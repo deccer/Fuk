@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "cstdlib": "cpp"
+    },
+    "dotnet.defaultSolution": "disable"
+}
