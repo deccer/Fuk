@@ -16,46 +16,50 @@
 #include "VulkanBindings.hpp"
 #include "Io.hpp"
 
-constexpr int32_t MAX_FRAMES_IN_FLIGHT = 1;
+constexpr int32_t MAX_FRAMES_IN_FLIGHT = 3;
 
 struct ApplicationState
 {
-    GLFWwindow* MainWindow;
+    GLFWwindow* MainWindow = nullptr;
     VulkanBindings Bindings;
     vkb::Instance Instance;
-    VkSurfaceKHR Surface;
+    VkSurfaceKHR Surface = nullptr;
     vkb::Device Device;
     vkb::Swapchain Swapchain;
+
+    bool Vsync = true;
+    VkClearValue ClearColor{ { { 0.15f, 0.0f, 0.6f, 1.0f } } };
 };
 
 struct RenderState
 {
-    VkQueue PresentQueue;
-    VkQueue GraphicsQueue;
+    VkQueue PresentQueue = nullptr;
+    VkQueue GraphicsQueue = nullptr;
 
-    VkRenderPass RenderPass;
+    VkRenderPass RenderPass = nullptr;
 
     std::vector<VkImage> SwapchainImages;
     std::vector<VkImageView> SwapchainImageViews;
     std::vector<VkFramebuffer> Framebuffers;
 
-    VkPipelineLayout GraphicsPipelineLayout;
-    VkPipeline GraphicsPipeline;
+    VkPipelineLayout GraphicsPipelineLayout = nullptr;
+    VkPipeline GraphicsPipeline = nullptr;
 
-    VkCommandPool CommandPool;
+    VkCommandPool CommandPool = nullptr;
     std::vector<VkCommandBuffer> CommandBuffers;
 
     std::vector<VkSemaphore> AvailableSemaphores;
     std::vector<VkSemaphore> FinishedSemaphores;
     std::vector<VkFence> FencesInFlight;
     std::vector<VkFence> ImagesInFlight;
-    size_t CurrentFrameIndex = 0;    
+    size_t CurrentFrameIndex;    
 };
 
-GLFWwindow* CreateMainWindow(const std::string& windowTitle)
+static GLFWwindow* CreateMainWindow(const std::string& windowTitle)
 {
     if (!glfwInit())
     {
+        std::cout << "GLFW: Unable to initialize\n";
         return nullptr;
     }
 
@@ -73,11 +77,10 @@ GLFWwindow* CreateMainWindow(const std::string& windowTitle)
     auto window = glfwCreateWindow(windowWidth, windowHeight, windowTitle.data(), nullptr, nullptr);
     if (window == nullptr)
     {
-        std::printf("C++: Unable to create window\n");
+        std::cout << "GLFW: Unable to create window\n";
         glfwTerminate();
         return nullptr;
     }
-    std::cout << "C++: Window Created\n";
 
     int32_t monitorLeft = 0;
     int32_t monitorTop = 0;
@@ -89,7 +92,7 @@ GLFWwindow* CreateMainWindow(const std::string& windowTitle)
     unsigned char* appImagePixels = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(&AppIcon[0]), AppIcon_length, &appImageWidth, &appImageHeight, nullptr, 4);
     if (appImagePixels != nullptr)
     {
-        GLFWimage appImage;
+        GLFWimage appImage{};
         appImage.width = 256;
         appImage.height = 256;
         appImage.pixels = appImagePixels;
@@ -100,7 +103,7 @@ GLFWwindow* CreateMainWindow(const std::string& windowTitle)
     return window;
 }
 
-VkSurfaceKHR CreateSurface(ApplicationState& applicationState, VkAllocationCallbacks* allocator = nullptr)
+static VkSurfaceKHR CreateSurface(ApplicationState& applicationState, VkAllocationCallbacks* allocator = nullptr)
 {
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     VkResult result = glfwCreateWindowSurface(applicationState.Instance, applicationState.MainWindow, allocator, &surface);
@@ -110,10 +113,10 @@ VkSurfaceKHR CreateSurface(ApplicationState& applicationState, VkAllocationCallb
         int errorCode = glfwGetError(&errorMessage);
         if (errorCode != GLFW_NO_ERROR)
         {
-            std::cout << errorCode << " ";
+            std::cout << errorCode;
             if (errorMessage != nullptr)
             {
-                std::cout << errorMessage;
+                std::cout << " " << errorMessage;
             }
             std::cout << "\n";
         }
@@ -122,7 +125,7 @@ VkSurfaceKHR CreateSurface(ApplicationState& applicationState, VkAllocationCallb
     return surface;
 }
 
-bool InitializeDevice(ApplicationState& applicationState)
+static bool InitializeDevice(ApplicationState& applicationState)
 {
     applicationState.MainWindow = CreateMainWindow("Fuk");
     if (applicationState.MainWindow == nullptr)
@@ -131,8 +134,10 @@ bool InitializeDevice(ApplicationState& applicationState)
     }
 
     vkb::InstanceBuilder instanceBuilder;
-    auto instanceResult = instanceBuilder.set_app_name("Fuk")
+    auto instanceResult = instanceBuilder
+        .set_app_name("Fuk")
         .request_validation_layers()
+        .enable_validation_layers()
         .use_default_debug_messenger()
         .build();
     if (!instanceResult)
@@ -174,7 +179,7 @@ bool CreateSwapchain(ApplicationState& applicationState)
     vkb::SwapchainBuilder swapchain_builder{ applicationState.Device };
     auto swapchainResult = swapchain_builder
         .set_old_swapchain(applicationState.Swapchain)
-        .set_desired_present_mode(VkPresentModeKHR::VK_PRESENT_MODE_IMMEDIATE_KHR)
+        .set_desired_present_mode(applicationState.Vsync ? VkPresentModeKHR::VK_PRESENT_MODE_FIFO_KHR : VkPresentModeKHR::VK_PRESENT_MODE_IMMEDIATE_KHR)
         .build();
     if (!swapchainResult)
     {
@@ -477,7 +482,7 @@ bool CreateCommandPool(ApplicationState& applicationState, RenderState& renderSt
     return true;
 }
 
-bool CreateCommandBuffers(ApplicationState& applicationState, RenderState& renderState)
+static bool CreateCommandBuffers(ApplicationState& applicationState, RenderState& renderState)
 {
     renderState.CommandBuffers.resize(renderState.Framebuffers.size());
 
@@ -494,7 +499,7 @@ bool CreateCommandBuffers(ApplicationState& applicationState, RenderState& rende
     {
         return false;
     }
-
+    
     for (size_t i = 0; i < renderState.CommandBuffers.size (); i++)
     {
         VkCommandBufferBeginInfo commandBufferBeginInfo = {};
@@ -511,9 +516,9 @@ bool CreateCommandBuffers(ApplicationState& applicationState, RenderState& rende
         renderPassBeginInfo.framebuffer = renderState.Framebuffers[i];
         renderPassBeginInfo.renderArea.offset = { 0, 0 };
         renderPassBeginInfo.renderArea.extent = applicationState.Swapchain.extent;
-        VkClearValue clearColor{ { { 0.0f, 0.0f, 0.0f, 1.0f } } };
+
         renderPassBeginInfo.clearValueCount = 1;
-        renderPassBeginInfo.pClearValues = &clearColor;
+        renderPassBeginInfo.pClearValues = &applicationState.ClearColor;
 
         VkViewport viewport = {};
         viewport.x = 0.0f;
@@ -529,17 +534,19 @@ bool CreateCommandBuffers(ApplicationState& applicationState, RenderState& rende
 
         applicationState.Bindings.vkCmdSetViewport(renderState.CommandBuffers[i], 0, 1, &viewport);
         applicationState.Bindings.vkCmdSetScissor(renderState.CommandBuffers[i], 0, 1, &scissor);
+        
         applicationState.Bindings.vkCmdBeginRenderPass(renderState.CommandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         applicationState.Bindings.vkCmdBindPipeline(renderState.CommandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, renderState.GraphicsPipeline);
         applicationState.Bindings.vkCmdDraw(renderState.CommandBuffers[i], 3, 1, 0, 0);
         applicationState.Bindings.vkCmdEndRenderPass(renderState.CommandBuffers[i]);
-
+        
         if (applicationState.Bindings.vkEndCommandBuffer(renderState.CommandBuffers[i]) != VK_SUCCESS)
         {
-            std::cout << "failed to record command buffer\n";
+            std::cout << "Vulkan: Failed to record command buffer\n";
             return false;
         }
     }
+    
     return true;
 }
 
@@ -571,7 +578,7 @@ bool CreateSynchronizationObjects(ApplicationState& applicationState, RenderStat
     return true;
 }
 
-bool RecreateSwapchain(ApplicationState& applicationState, RenderState& renderState)
+static bool RecreateSwapchain(ApplicationState& applicationState, RenderState& renderState)
 {
     applicationState.Bindings.vkDeviceWaitIdle(applicationState.Device);
     applicationState.Bindings.vkDestroyCommandPool(applicationState.Device, renderState.CommandPool, nullptr);
@@ -606,7 +613,7 @@ bool RecreateSwapchain(ApplicationState& applicationState, RenderState& renderSt
     return true;
 }
 
-bool DrawFrame(ApplicationState& applicationState, RenderState& renderState)
+static bool DrawFrame(ApplicationState& applicationState, RenderState& renderState)
 {
     applicationState.Bindings.vkWaitForFences(applicationState.Device, 1, &renderState.FencesInFlight[renderState.CurrentFrameIndex], VK_TRUE, UINT64_MAX);
 
