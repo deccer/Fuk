@@ -357,8 +357,6 @@ bool Engine::InitializeVulkan()
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
-    _dispatchTable = vkbDevice.make_table();
-
     return true;
 }
 
@@ -624,5 +622,5 @@ void Engine::SetDebugName(VkObjectType objectType, void* object, const std::stri
         .pObjectName = debugName.c_str(),
     };
 
-    _dispatchTable.setDebugUtilsObjectNameEXT(&debugUtilsObjectNameInfo);
+    vkSetDebugUtilsObjectNameEXT(_device, &debugUtilsObjectNameInfo);
 }

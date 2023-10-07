@@ -62,8 +62,6 @@ private:
     VkPipelineLayout _trianglePipelineLayout;
     VkPipeline _trianglePipeline;
 
-    vkb::DispatchTable _dispatchTable;
-
     bool InitializeVulkan();
     bool InitializeSwapchain();
     bool InitializeCommandBuffers();
