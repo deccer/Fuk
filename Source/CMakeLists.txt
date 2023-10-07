@@ -2,8 +2,6 @@ project(Fuk)
 
 set(CMAKE_CXX_STANDARD 23)
 
-find_package(Vulkan REQUIRED)
-
 if (MSVC)
     add_custom_target(copy_data ALL COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE_INIT}/data)
 else ()
@@ -11,6 +9,8 @@ else ()
 endif ()
 
 add_executable(Fuk
+    Engine.cpp
+	PipelineBuilder.cpp
     Main.cpp
 )
 
@@ -20,9 +20,50 @@ if (MSVC)
     target_compile_options(glfw INTERFACE /w)
 endif ()
 
-add_dependencies(Fuk copy_data)
+add_dependencies(Fuk Shaders copy_data)
+
+target_compile_options(Fuk
+	PRIVATE
+	$<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
+	-Wall
+	-Wextra
+	-pedantic-errors
+	-Wno-missing-field-initializers
+	-Wno-unused-result
+	>
+	$<$<CXX_COMPILER_ID:MSVC>:
+	/W4
+	/WX
+	/permissive-
+	/wd4324 # structure was padded
+	>
+)
+
+target_compile_definitions(Fuk PRIVATE
+  $<$<CONFIG:Debug>:_DEBUG>
+  $<$<BOOL:${WIN32}>:
+  	_CRT_SECURE_NO_WARNINGS
+  	WIN32_LEAN_AND_MEAN
+  	NOMINMAX
+  	TRACY_ENABLE
+  	STBI_MSC_SECURE_CRT
+	>
+	VK_NO_PROTOTYPES  
+)
+
 target_include_directories(Fuk INTERFACE ${VULKAN_SDK}/include)
-target_link_libraries(Fuk PRIVATE glfw vk-bootstrap vk-bootstrap-compiler-warnings vk-bootstrap-vulkan-headers stb_image)
+target_include_directories(Fuk PUBLIC ${CMAKE_BINARY_DIR}/VulkanMemoryAllocator-src/include)
+
+target_link_libraries(Fuk PRIVATE
+	glm
+	vma
+	volk
+	glfw
+	spdlog
+	TracyClient
+	vk-bootstrap
+	vk-bootstrap-compiler-warnings
+)
 
 #get_cmake_property(_variableNames VARIABLES)
 #foreach (_variableName ${_variableNames})

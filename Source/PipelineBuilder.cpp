@@ -1,0 +1,196 @@
+#include "PipelineBuilder.hpp"
+
+#include <iostream>
+
+VkPipelineShaderStageCreateInfo CreateShaderStageCreateInfo(VkShaderStageFlagBits stage, VkShaderModule shaderModule)
+{
+    VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo{};
+    pipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineShaderStageCreateInfo.pNext = nullptr;
+    pipelineShaderStageCreateInfo.stage = stage;
+    pipelineShaderStageCreateInfo.module = shaderModule;
+    pipelineShaderStageCreateInfo.pName = "main";
+    return pipelineShaderStageCreateInfo;
+}
+
+VkPipelineVertexInputStateCreateInfo CreateVertexInputStateCreateInfo()
+{
+    VkPipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo = {};
+    pipelineVertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    pipelineVertexInputStateCreateInfo.pNext = nullptr;
+
+    //no vertex bindings or attributes
+    pipelineVertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
+    pipelineVertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
+    return pipelineVertexInputStateCreateInfo;
+}
+
+VkPipelineInputAssemblyStateCreateInfo CreateInputAssemblyCreateInfo(VkPrimitiveTopology topology)
+{
+    VkPipelineInputAssemblyStateCreateInfo pipelineInputAssemblyState = {};
+    pipelineInputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    pipelineInputAssemblyState.pNext = nullptr;
+
+    pipelineInputAssemblyState.topology = topology;
+    pipelineInputAssemblyState.primitiveRestartEnable = VK_FALSE;
+    return pipelineInputAssemblyState;
+}
+
+VkPipelineRasterizationStateCreateInfo CreateRasterizationStateCreateInfo(VkPolygonMode polygonMode)
+{
+    VkPipelineRasterizationStateCreateInfo pipelineRasterizationStateCreateInfo = {};
+    pipelineRasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    pipelineRasterizationStateCreateInfo.pNext = nullptr;
+
+    pipelineRasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
+    //discards all primitives before the rasterization stage if enabled which we don't want
+    pipelineRasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+
+    pipelineRasterizationStateCreateInfo.polygonMode = polygonMode;
+    pipelineRasterizationStateCreateInfo.lineWidth = 1.0f;
+    //no backface cull
+    pipelineRasterizationStateCreateInfo.cullMode = VK_CULL_MODE_NONE;
+    pipelineRasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    //no depth bias
+    pipelineRasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
+    pipelineRasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
+    pipelineRasterizationStateCreateInfo.depthBiasClamp = 0.0f;
+    pipelineRasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
+
+    return pipelineRasterizationStateCreateInfo;
+}
+
+VkPipelineMultisampleStateCreateInfo CreateMultisampleStateCreateInfo()
+{
+    VkPipelineMultisampleStateCreateInfo pipelineMultisampleCreateInfo = {};
+    pipelineMultisampleCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    pipelineMultisampleCreateInfo.pNext = nullptr;
+
+    pipelineMultisampleCreateInfo.sampleShadingEnable = VK_FALSE;
+    //multisampling defaulted to no multisampling (1 sample per pixel)
+    pipelineMultisampleCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    pipelineMultisampleCreateInfo.minSampleShading = 1.0f;
+    pipelineMultisampleCreateInfo.pSampleMask = nullptr;
+    pipelineMultisampleCreateInfo.alphaToCoverageEnable = VK_FALSE;
+    pipelineMultisampleCreateInfo.alphaToOneEnable = VK_FALSE;
+    return pipelineMultisampleCreateInfo;
+}
+
+VkPipelineColorBlendAttachmentState CreateColorBlendAttachmentState()
+{
+    VkPipelineColorBlendAttachmentState pipelineColorBlendAttachmentState = {};
+    pipelineColorBlendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                                                       VK_COLOR_COMPONENT_G_BIT |
+                                                       VK_COLOR_COMPONENT_B_BIT |
+                                                       VK_COLOR_COMPONENT_A_BIT;
+    pipelineColorBlendAttachmentState.blendEnable = VK_FALSE;
+    return pipelineColorBlendAttachmentState;
+}
+
+PipelineBuilder& PipelineBuilder::WithGraphicsShadingStages(
+        VkShaderModule vertexShaderModule,
+        VkShaderModule fragmentShaderModule)
+{
+    _shaderStages.push_back(CreateShaderStageCreateInfo(VK_SHADER_STAGE_VERTEX_BIT, vertexShaderModule));
+    _shaderStages.push_back(CreateShaderStageCreateInfo(VK_SHADER_STAGE_FRAGMENT_BIT, fragmentShaderModule));    
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithVertexInput()
+{
+    _vertexInputInfo = CreateVertexInputStateCreateInfo();
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithTopology(VkPrimitiveTopology primitiveTopology)
+{
+    _inputAssembly = CreateInputAssemblyCreateInfo(primitiveTopology);
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithViewportAndScissor(VkViewport viewport, VkRect2D scissor)
+{
+    _viewport = viewport;
+    _scissor = scissor;
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithPolygonMode(VkPolygonMode polygonMode)
+{
+    _rasterizer = CreateRasterizationStateCreateInfo(polygonMode);
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithoutMultisampling()
+{
+    _multisampling = CreateMultisampleStateCreateInfo();
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::WithoutBlending()
+{
+    _colorBlendAttachment = CreateColorBlendAttachmentState();
+    return *this;
+}
+
+PipelineBuilder& PipelineBuilder::ForPipelineLayout(VkPipelineLayout pipelineLayout)
+{
+    _pipelineLayout = pipelineLayout;
+    return *this;
+}
+
+bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline)
+{
+    VkPipelineViewportStateCreateInfo pipelineViewportStateCreateInfo = {};
+    pipelineViewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    pipelineViewportStateCreateInfo.pNext = nullptr;
+    pipelineViewportStateCreateInfo.viewportCount = 1;
+    pipelineViewportStateCreateInfo.pViewports = &_viewport;
+    pipelineViewportStateCreateInfo.scissorCount = 1;
+    pipelineViewportStateCreateInfo.pScissors = &_scissor;
+
+    VkPipelineColorBlendStateCreateInfo pipelineColorBlendStateCreateInfo = {};
+    pipelineColorBlendStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    pipelineColorBlendStateCreateInfo.pNext = nullptr;
+    pipelineColorBlendStateCreateInfo.logicOpEnable = VK_FALSE;
+    pipelineColorBlendStateCreateInfo.logicOp = VK_LOGIC_OP_COPY;
+    pipelineColorBlendStateCreateInfo.attachmentCount = 1;
+    pipelineColorBlendStateCreateInfo.pAttachments = &_colorBlendAttachment;
+
+    VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
+    pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineCreateInfo.pNext = nullptr;
+    pipelineCreateInfo.stageCount = _shaderStages.size();
+    pipelineCreateInfo.pStages = _shaderStages.data();
+    pipelineCreateInfo.pVertexInputState = &_vertexInputInfo;
+    pipelineCreateInfo.pInputAssemblyState = &_inputAssembly;
+    pipelineCreateInfo.pViewportState = &pipelineViewportStateCreateInfo;
+    pipelineCreateInfo.pRasterizationState = &_rasterizer;
+    pipelineCreateInfo.pMultisampleState = &_multisampling;
+    pipelineCreateInfo.pColorBlendState = &pipelineColorBlendStateCreateInfo;
+    pipelineCreateInfo.layout = _pipelineLayout;
+    pipelineCreateInfo.renderPass = renderPass;
+    pipelineCreateInfo.subpass = 0;
+    pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+
+    if (vkCreateGraphicsPipelines(
+        device,
+        VK_NULL_HANDLE,
+        1,
+        &pipelineCreateInfo,
+        nullptr,
+        pipeline) != VK_SUCCESS)
+    {
+        pipeline = VK_NULL_HANDLE;
+        std::cerr << "PipelineBuilder: Failed to create pipeline\n";
+        return false;
+    }
+
+    _deletionQueue.Push([=]()
+    {
+        std::cout << "Destroying pipeline\n";
+        vkDestroyPipeline(device, *pipeline, nullptr);
+    });
+
+    return true;   
+}
