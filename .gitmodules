@@ -22,3 +22,9 @@
 [submodule "ThirdParty/stb"]
 	path = ThirdParty/stb
 	url = https://github.com/nothings/stb.git
+[submodule "ThirdParty/fastgltf"]
+	path = ThirdParty/fastgltf
+	url = https://github.com/spnda/fastgltf.git
+[submodule "data/models/deccer-cubes"]
+	path = data/models/deccer-cubes
+	url = https://github.com/GraphicsProgramming/deccer-cubes.git
