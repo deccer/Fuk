@@ -11,6 +11,7 @@ endif ()
 add_executable(Fuk
     Engine.cpp
 	PipelineBuilder.cpp
+	Mesh.cpp
     Main.cpp
 )
 
@@ -27,7 +28,6 @@ target_compile_options(Fuk
 	$<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
 	-Wall
 	-Wextra
-	-pedantic-errors
 	-Wno-missing-field-initializers
 	-Wno-unused-result
 	>
@@ -63,6 +63,7 @@ target_link_libraries(Fuk PRIVATE
 	TracyClient
 	vk-bootstrap
 	vk-bootstrap-compiler-warnings
+	fastgltf
 )
 
 #get_cmake_property(_variableNames VARIABLES)

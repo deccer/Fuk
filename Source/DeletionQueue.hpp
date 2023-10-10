@@ -11,7 +11,7 @@ public:
 		_deletors.push_back(function);
 	}
 
-	void flush()
+	void Flush()
     {
 		for (auto it = _deletors.rbegin(); it != _deletors.rend(); it++)
         {

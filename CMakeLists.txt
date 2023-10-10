@@ -54,6 +54,9 @@ endif()
 
 add_subdirectory(Source)
 
+# Setup: fastgltf
+add_subdirectory(ThirdParty/fastgltf)
+
 # Compile Shaders
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

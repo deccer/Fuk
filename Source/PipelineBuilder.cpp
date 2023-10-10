@@ -4,25 +4,13 @@
 
 VkPipelineShaderStageCreateInfo CreateShaderStageCreateInfo(VkShaderStageFlagBits stage, VkShaderModule shaderModule)
 {
-    VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo{};
+    VkPipelineShaderStageCreateInfo pipelineShaderStageCreateInfo = {};
     pipelineShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     pipelineShaderStageCreateInfo.pNext = nullptr;
     pipelineShaderStageCreateInfo.stage = stage;
     pipelineShaderStageCreateInfo.module = shaderModule;
     pipelineShaderStageCreateInfo.pName = "main";
     return pipelineShaderStageCreateInfo;
-}
-
-VkPipelineVertexInputStateCreateInfo CreateVertexInputStateCreateInfo()
-{
-    VkPipelineVertexInputStateCreateInfo pipelineVertexInputStateCreateInfo = {};
-    pipelineVertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    pipelineVertexInputStateCreateInfo.pNext = nullptr;
-
-    //no vertex bindings or attributes
-    pipelineVertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
-    pipelineVertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
-    return pipelineVertexInputStateCreateInfo;
 }
 
 VkPipelineInputAssemblyStateCreateInfo CreateInputAssemblyCreateInfo(VkPrimitiveTopology topology)
@@ -96,9 +84,17 @@ PipelineBuilder& PipelineBuilder::WithGraphicsShadingStages(
     return *this;
 }
 
-PipelineBuilder& PipelineBuilder::WithVertexInput()
+PipelineBuilder& PipelineBuilder::WithVertexInput(const VertexInputDescription& vertexInputDescription)
 {
-    _vertexInputInfo = CreateVertexInputStateCreateInfo();
+    _vertexInputInfo = {};
+    _vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    _vertexInputInfo.pNext = nullptr;
+
+    _vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputDescription.Bindings.size());
+    _vertexInputInfo.pVertexBindingDescriptions = vertexInputDescription.Bindings.data();
+    _vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputDescription.Attributes.size());
+    _vertexInputInfo.pVertexAttributeDescriptions = vertexInputDescription.Attributes.data();
+
     return *this;
 }
 
@@ -139,6 +135,22 @@ PipelineBuilder& PipelineBuilder::ForPipelineLayout(VkPipelineLayout pipelineLay
     return *this;
 }
 
+PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOperation)
+{
+    _depthStencil = {};
+    _depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    _depthStencil.pNext = nullptr;
+
+    _depthStencil.depthTestEnable = VK_TRUE;
+    _depthStencil.depthWriteEnable = VK_TRUE;
+    _depthStencil.depthCompareOp = compareOperation;
+    _depthStencil.depthBoundsTestEnable = VK_FALSE;
+    _depthStencil.minDepthBounds = 0.0f; // Optional
+    _depthStencil.maxDepthBounds = 1.0f; // Optional
+    _depthStencil.stencilTestEnable = VK_FALSE;
+    return *this;
+}
+
 bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline)
 {
     VkPipelineViewportStateCreateInfo pipelineViewportStateCreateInfo = {};
@@ -160,7 +172,7 @@ bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipel
     VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
     pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineCreateInfo.pNext = nullptr;
-    pipelineCreateInfo.stageCount = _shaderStages.size();
+    pipelineCreateInfo.stageCount = static_cast<uint32_t>(_shaderStages.size());
     pipelineCreateInfo.pStages = _shaderStages.data();
     pipelineCreateInfo.pVertexInputState = &_vertexInputInfo;
     pipelineCreateInfo.pInputAssemblyState = &_inputAssembly;
@@ -168,6 +180,7 @@ bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipel
     pipelineCreateInfo.pRasterizationState = &_rasterizer;
     pipelineCreateInfo.pMultisampleState = &_multisampling;
     pipelineCreateInfo.pColorBlendState = &pipelineColorBlendStateCreateInfo;
+    pipelineCreateInfo.pDepthStencilState = &_depthStencil;
     pipelineCreateInfo.layout = _pipelineLayout;
     pipelineCreateInfo.renderPass = renderPass;
     pipelineCreateInfo.subpass = 0;
