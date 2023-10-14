@@ -2,9 +2,12 @@
 
 #include <volk.h>
 #include <vector>
+#include <expected>
+#include <string>
 
 #include "DeletionQueue.hpp"
 #include "Types.hpp"
+#include "Pipeline.hpp"
 
 class PipelineBuilder
 {
@@ -24,7 +27,7 @@ public:
     PipelineBuilder& WithDepthTestingEnabled(VkCompareOp compareOperation = VkCompareOp::VK_COMPARE_OP_LESS);
     PipelineBuilder& ForPipelineLayout(VkPipelineLayout pipelineLayout);
 
-    bool TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline);
+    std::expected<Pipeline, std::string> Build(VkDevice device, VkRenderPass renderPass);
 
 private:
     DeletionQueue _deletionQueue;

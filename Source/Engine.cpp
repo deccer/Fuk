@@ -1,6 +1,5 @@
 #include "Engine.hpp"
 #include "ApplicationIcon.hpp"
-
 #include "Io.hpp"
 #include "Stbi.hpp"
 #include "PipelineBuilder.hpp"
@@ -167,21 +166,21 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
         _allocator,
         &imageCreateInfo,
         &allocationCreateInfo,
-        &image.Image,
-        &image.Allocation,
+        &image.image,
+        &image.allocation,
         nullptr) != VK_SUCCESS)
     {
         return std::unexpected("Vulkan: Unable to create image");
     }
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE, image.Image, label);
+    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE, image.image, label);
 
     VkImageViewCreateInfo imageViewCreateInfo = {};
     imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     imageViewCreateInfo.pNext = nullptr;
 
     imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    imageViewCreateInfo.image = image.Image;
+    imageViewCreateInfo.image = image.image;
     imageViewCreateInfo.format = format;
     imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
     imageViewCreateInfo.subresourceRange.levelCount = 1;
@@ -189,13 +188,13 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
     imageViewCreateInfo.subresourceRange.layerCount = 1;
     imageViewCreateInfo.subresourceRange.aspectMask = imageAspectFlags;
 
-    if (vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &image.ImageView) != VK_SUCCESS)
+    if (vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &image.imageView) != VK_SUCCESS)
     {
         return std::unexpected("Vulkan: Failed to create image view");
     }
 
     auto viewLabel = std::format("{}_ImageView", label);
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE_VIEW, image.ImageView, viewLabel);
+    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE_VIEW, image.imageView, viewLabel);
 
     return image;
 }
@@ -320,11 +319,19 @@ bool Engine::Load()
         return false;
     }
 
-    VkViewport viewport = {.x = 0, .y = 0, .width = (float)_windowExtent.width, .height = (float)_windowExtent.height, .minDepth = 0.0f, .maxDepth = 1.0f};
+    VkViewport viewport =
+    {
+        .x = 0,
+        .y = (float)_windowExtent.height,
+        .width = (float)_windowExtent.width,
+        .height = -(float)_windowExtent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
     VkRect2D scissor = { .offset = { 0, 0 }, .extent = _windowExtent };
 
     PipelineBuilder pipelineBuilder(_deletionQueue);
-    if (!pipelineBuilder
+    auto pipelineResult = pipelineBuilder
         .WithGraphicsShadingStages(_simpleVertexShaderModule, _simpleFragmentShaderModule)
         .WithVertexInput(VertexPositionNormalUv::GetVertexInputDescription())
         .WithTopology(VkPrimitiveTopology::VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
@@ -334,13 +341,16 @@ bool Engine::Load()
         .WithoutBlending()
         .WithoutMultisampling()
         .ForPipelineLayout(_trianglePipelineLayout)
-        .TryBuild(_device, _renderPass, &_trianglePipeline))
+        .Build(_device, _renderPass);
+    if (!pipelineResult.has_value())
     {
-        std::cout << "Engine: Failed to build pipeline\n";
+        std::cout << pipelineResult.error();
         return false;
     }
 
-    if (!LoadMeshFromFile("data/models/deccer-cubes/SM_Deccer_Cubes_Textured_Complex.gltf"))
+    _trianglePipeline = pipelineResult.value().pipeline;
+
+    if (!LoadMeshFromFile("SM_Cubes", "data/models/deccer-cubes/SM_Deccer_Cubes_Textured_Complex.gltf"))
     {
         return false;
     }
@@ -348,7 +358,7 @@ bool Engine::Load()
     return true;
 }
 
-bool Engine::LoadMeshFromFile(const std::string& filePath)
+bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& filePath)
 {
     fastgltf::Parser parser(fastgltf::Extensions::KHR_mesh_quantization);
 
@@ -412,42 +422,48 @@ bool Engine::LoadMeshFromFile(const std::string& filePath)
 
         if (node->meshIndex.has_value())
         {
-            for (const fastgltf::Mesh& fgMesh = asset.meshes[node->meshIndex.value()]; const auto& primitive : fgMesh.primitives)
+            std::vector<std::string> meshNames(node->children.size());
+            for (const fastgltf::Mesh& fgMesh = asset.meshes[node->meshIndex.value()];
+                 const auto& primitive : fgMesh.primitives)
             {
                 Mesh mesh;
-                mesh._vertices = ConvertVertexBufferFormat(asset, primitive);
-                mesh._indices = ConvertIndexBufferFormat(asset, primitive);
-                mesh._worldMatrix = globalTransform;
+                mesh.vertices = ConvertVertexBufferFormat(asset, primitive);
+                mesh.indices = ConvertIndexBufferFormat(asset, primitive);
+                mesh.worldMatrix = globalTransform;
                 
                 auto label = std::format("VertexBuffer_{}", node->name);
                 auto createBufferResult = CreateBuffer(
                     label,
                     VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                     VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
-                    mesh._vertices);
+                    mesh.vertices);
                 if (!createBufferResult.has_value())
                 {
                     std::cerr << createBufferResult.error() << "\n";
                     return false;
                 }
 
-                mesh._vertexBuffer = createBufferResult.value();
+                mesh.vertexBuffer = createBufferResult.value();
 
                 createBufferResult = CreateBuffer(
                     "IndexBuffer",
                     VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                     VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
-                    mesh._indices);
+                    mesh.indices);
                 if (!createBufferResult.has_value())
                 {
                     std::cerr << createBufferResult.error() << "\n";
                     return false;
                 }
 
-                mesh._indexBuffer = createBufferResult.value();
+                mesh.indexBuffer = createBufferResult.value();
 
-                _meshes.push_back(mesh);
+                auto meshName = node->name.c_str();
+                meshNames.push_back(meshName);
+                _meshNameToMeshMap.emplace(meshName, mesh);
             }
+
+            _modelNameToMeshNameMap.emplace(modelName, meshNames);
         }
     }
 
@@ -456,14 +472,16 @@ bool Engine::LoadMeshFromFile(const std::string& filePath)
 
 bool Engine::Draw()
 {
-    VkResult result = vkWaitForFences(_device, 1, &_renderFence, true, 1000000000);
+    Frame frame = GetCurrentFrame();
+
+    VkResult result = vkWaitForFences(_device, 1, &frame.renderFence, true, 1000000000);
     if (result != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to wait for render fence\n" << result << "\n";
         return false;
     }
 
-    if (vkResetFences(_device, 1, &_renderFence) != VK_SUCCESS)
+    if (vkResetFences(_device, 1, &frame.renderFence) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to reset render fence\n";
         return false;
@@ -474,7 +492,7 @@ bool Engine::Draw()
         _device,
         _swapchain,
         1000000000,
-        _presentSemaphore,
+        frame.presentSemaphore,
         nullptr,
         &swapchainImageIndex) != VK_SUCCESS)
     {
@@ -482,7 +500,7 @@ bool Engine::Draw()
         return false;
     }
 
-    if (vkResetCommandBuffer(_mainCommandBuffer, 0) != VK_SUCCESS)
+    if (vkResetCommandBuffer(frame.commandBuffer, 0) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to reset command buffer\n";
         return false;
@@ -494,7 +512,7 @@ bool Engine::Draw()
     commandBufferBeginInfo.pInheritanceInfo = nullptr;
     commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(_mainCommandBuffer, &commandBufferBeginInfo) != VK_SUCCESS)
+    if (vkBeginCommandBuffer(frame.commandBuffer, &commandBufferBeginInfo) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to begin command buffer\n";
         return false;
@@ -521,29 +539,13 @@ bool Engine::Draw()
     renderPassBeginInfo.clearValueCount = 2;
     renderPassBeginInfo.pClearValues = &clearValues[0];
 
-    vkCmdBeginRenderPass(_mainCommandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);    
+    vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);    
 
-    vkCmdBindPipeline(_mainCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _trianglePipeline);
+    DrawRenderables(frame.commandBuffer, _renderables.data(), _renderables.size());
 
-    auto x = glm::pi<float>();
-    MeshPushConstants pushConstants;
-    pushConstants.ProjectionMatrix = glm::perspective(x / 2.0f, _windowExtent.width / (float)_windowExtent.height, 0.1f, 512.0f);
-    pushConstants.ViewMatrix = glm::lookAtRH(glm::vec3(2, 3, 4), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+    vkCmdEndRenderPass(frame.commandBuffer);
 
-    VkDeviceSize offset = 0;
-    for (auto &&mesh : _meshes)
-    {
-        pushConstants.WorldMatrix = mesh._worldMatrix;
-        vkCmdPushConstants(_mainCommandBuffer, _trianglePipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &pushConstants);
-
-        vkCmdBindVertexBuffers(_mainCommandBuffer, 0, 1, &mesh._vertexBuffer.Buffer, &offset);
-        vkCmdBindIndexBuffer(_mainCommandBuffer, mesh._indexBuffer.Buffer, offset, VkIndexType::VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(_mainCommandBuffer, mesh._indices.size(), 1, 0, 0, 0);
-    }
-
-    vkCmdEndRenderPass(_mainCommandBuffer);
-
-    if (vkEndCommandBuffer(_mainCommandBuffer) != VK_SUCCESS)
+    if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to end command buffer\n";
         return false;
@@ -557,13 +559,13 @@ bool Engine::Draw()
 
     submitInfo.pWaitDstStageMask = &waitStageFlags;
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &_presentSemaphore;
+    submitInfo.pWaitSemaphores = &frame.presentSemaphore;
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &_renderSemaphore;
+    submitInfo.pSignalSemaphores = &frame.renderSemaphore;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &_mainCommandBuffer;
+    submitInfo.pCommandBuffers = &frame.commandBuffer;
 
-    if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, _renderFence) != VK_SUCCESS)
+    if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, frame.renderFence) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to submit to queue\n";
         return false;
@@ -576,7 +578,7 @@ bool Engine::Draw()
     presentInfo.pNext = nullptr;
     presentInfo.pSwapchains = &_swapchain;
     presentInfo.swapchainCount = 1;
-    presentInfo.pWaitSemaphores = &_renderSemaphore;
+    presentInfo.pWaitSemaphores = &frame.renderSemaphore;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pImageIndices = &swapchainImageIndex;
 
@@ -731,35 +733,43 @@ bool Engine::InitializeCommandBuffers()
     commandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
     commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    if (vkCreateCommandPool(
-        _device,
-        &commandPoolCreateInfo,
-        nullptr,
-        &_commandPool) != VK_SUCCESS)
+	for (size_t i = 0; i < FRAME_COUNT; i++)
     {
-        std::cout << "Vulkan: Failed to create command pool\n";
-        return false;
-    }
+        if (vkCreateCommandPool(
+            _device,
+            &commandPoolCreateInfo,
+            nullptr,
+            &_frames[i].commandPool) != VK_SUCCESS)
+        {
+            std::cout << "Vulkan: Failed to create command pool\n";
+            return false;
+        }
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_POOL, _commandPool, "CommandPool");
+        SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_POOL, &_frames[i].commandPool, std::format("CommandPool_{}\0", i));
 
-    VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-    commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    commandBufferAllocateInfo.pNext = nullptr;
-    commandBufferAllocateInfo.commandPool = _commandPool;
-    commandBufferAllocateInfo.commandBufferCount = 1;
-    commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
+        commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        commandBufferAllocateInfo.pNext = nullptr;
+        commandBufferAllocateInfo.commandPool = _frames[i].commandPool;
+        commandBufferAllocateInfo.commandBufferCount = 1;
+        commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
-    if(vkAllocateCommandBuffers(
-       _device,
-       &commandBufferAllocateInfo,
-       &_mainCommandBuffer) != VK_SUCCESS)
-    {
-        std::cout << "Vulkan: Failed to create command buffer\n";
-        return false;
-    }
+        if(vkAllocateCommandBuffers(
+            _device,
+            &commandBufferAllocateInfo,
+            &_frames[i].commandBuffer) != VK_SUCCESS)
+        {
+            std::cout << "Vulkan: Failed to create command buffer\n";
+            return false;
+        }
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_BUFFER, _mainCommandBuffer, "MainCommandBuffer");
+        SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_BUFFER, &_frames[i].commandBuffer, std::format("CommandBuffer_{}", i));
+
+        _deletionQueue.Push([=]()
+        {
+			vkDestroyCommandPool(_device, _frames[i].commandPool, nullptr);
+		});
+	}    
 
     return true;
 }
@@ -868,7 +878,7 @@ bool Engine::InitializeFramebuffers()
     {
         VkImageView attachments[2];
         attachments[0] = _swapchainImageViews[i];
-        attachments[1] = _depthImage.ImageView;
+        attachments[1] = _depthImage.imageView;
 
         framebufferCreateInfo.attachmentCount = 2;
         framebufferCreateInfo.pAttachments = attachments;
@@ -889,27 +899,37 @@ bool Engine::InitializeSynchronizationStructures()
     fenceCreateInfo.pNext = nullptr;
     fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    if (vkCreateFence(_device, &fenceCreateInfo, nullptr, &_renderFence) != VK_SUCCESS)
-    {
-        std::cerr << "Vulkan: Failed to create render fence\n";
-        return false;
-    }
-
     VkSemaphoreCreateInfo semaphoreCreateInfo = {};
     semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     semaphoreCreateInfo.pNext = nullptr;
     semaphoreCreateInfo.flags = 0;
 
-    if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_presentSemaphore) != VK_SUCCESS)
+    for (size_t i = 0; i < FRAME_COUNT; i++)
     {
-        std::cerr << "Vulkan: Failed to create present semaphore\n";
-        return false;
-    }
+        if (vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i].renderFence) != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: Failed to create render fence\n";
+            return false;
+        }
 
-    if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_renderSemaphore) != VK_SUCCESS)
-    {
-        std::cerr << "Vulkan: Failed to create render semaphore\n";
-        return false;
+        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i].presentSemaphore) != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: Failed to create present semaphore\n";
+            return false;
+        }
+
+        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i].renderSemaphore) != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: Failed to create render semaphore\n";
+            return false;
+        }
+
+        _deletionQueue.Push([=]()
+        {
+            vkDestroyFence(_device, _frames[i].renderFence, nullptr);
+            vkDestroySemaphore(_device, _frames[i].presentSemaphore, nullptr);
+            vkDestroySemaphore(_device, _frames[i].renderSemaphore, nullptr);
+        });
     }
 
     return true;
@@ -948,17 +968,11 @@ void Engine::Unload()
 
     _deletionQueue.Flush();
     
-    vkDestroyFence(_device, _renderFence, nullptr);
-    vkDestroySemaphore(_device, _renderSemaphore, nullptr);
-    vkDestroySemaphore(_device, _presentSemaphore, nullptr);
-
     vkDestroyShaderModule(_device, _simpleVertexShaderModule, nullptr);
     vkDestroyShaderModule(_device, _simpleFragmentShaderModule, nullptr);
 
     vkDestroyPipeline(_device, _trianglePipeline, nullptr);
     vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);    
-
-    vkDestroyCommandPool(_device, _commandPool, nullptr);
 
     for (size_t imageViewIndex = 0; imageViewIndex < _swapchainImageViews.size(); imageViewIndex++)
     {
@@ -1021,6 +1035,53 @@ void Engine::SetDebugName(VkObjectType objectType, void* object, const std::stri
         .pObjectName = debugName.c_str(),
     };
 
-    vkSetDebugUtilsObjectNameEXT(_device, &debugUtilsObjectNameInfo);
+    if (vkSetDebugUtilsObjectNameEXT(_device, &debugUtilsObjectNameInfo) != VK_SUCCESS)
+    {
+        std::cerr << "Vulkan: Unable to set debug util object name\n";
+    }
 #endif
+}
+
+void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count)
+{
+    MeshPushConstants pushConstants;
+    pushConstants.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
+    pushConstants.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+
+	Mesh* lastMesh = nullptr;
+	Pipeline* lastPipeline = nullptr;
+	for (size_t i = 0; i < count; i++)
+    {
+        auto& renderable = first[i];
+        if (renderable.pipeline != lastPipeline)
+        {
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline->pipeline);
+            lastPipeline = renderable.pipeline;
+        }
+
+        if (renderable.mesh != lastMesh)
+        {
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, &renderable.mesh->vertexBuffer.buffer, &offset);
+            vkCmdBindIndexBuffer(commandBuffer, renderable.mesh->indexBuffer.buffer, offset, VkIndexType::VK_INDEX_TYPE_UINT32);
+        }
+
+        pushConstants.worldMatrix = renderable.worldMatrix;
+        vkCmdPushConstants(commandBuffer, _trianglePipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &pushConstants);
+
+        vkCmdDrawIndexed(commandBuffer, renderable.mesh->indices.size(), 1, 0, 0, 0);
+    }
+}
+
+Mesh* Engine::GetMesh(const std::string& name)
+{
+    auto it = _meshNameToMeshMap.find(name);
+    return it == _meshNameToMeshMap.end()
+        ? nullptr
+        : &(*it).second;
+}
+
+Frame& Engine::GetCurrentFrame()
+{
+    return _frames[_frameIndex % FRAME_COUNT];
 }

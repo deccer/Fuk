@@ -10,28 +10,28 @@
 
 struct VertexPositionNormalColor
 {
-    glm::vec3 Position;
-    glm::vec3 Normal;
-    glm::vec3 Color;
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec3 color;
 
     static VertexInputDescription GetVertexInputDescription();
 };
 
 struct VertexPositionNormalUv
 {
-    glm::vec3 Position;
-    glm::vec3 Normal;
-    glm::vec2 Uv;
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 uv;
 
     static VertexInputDescription GetVertexInputDescription();
 };
 
 struct Mesh
 {
-	std::vector<VertexPositionNormalUv> _vertices;
-    std::vector<uint32_t> _indices;
-	AllocatedBuffer _vertexBuffer;
-    AllocatedBuffer _indexBuffer;
+	std::vector<VertexPositionNormalUv> vertices;
+    std::vector<uint32_t> indices;
+	AllocatedBuffer vertexBuffer;
+    AllocatedBuffer indexBuffer;
 
-    glm::mat4 _worldMatrix;
+    glm::mat4 worldMatrix;
 };

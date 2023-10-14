@@ -90,10 +90,10 @@ PipelineBuilder& PipelineBuilder::WithVertexInput(const VertexInputDescription& 
     _vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     _vertexInputInfo.pNext = nullptr;
 
-    _vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputDescription.Bindings.size());
-    _vertexInputInfo.pVertexBindingDescriptions = vertexInputDescription.Bindings.data();
-    _vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputDescription.Attributes.size());
-    _vertexInputInfo.pVertexAttributeDescriptions = vertexInputDescription.Attributes.data();
+    _vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexInputDescription.bindings.size());
+    _vertexInputInfo.pVertexBindingDescriptions = vertexInputDescription.bindings.data();
+    _vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputDescription.attributes.size());
+    _vertexInputInfo.pVertexAttributeDescriptions = vertexInputDescription.attributes.data();
 
     return *this;
 }
@@ -151,7 +151,8 @@ PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOpe
     return *this;
 }
 
-bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline)
+std::expected<Pipeline, std::string> PipelineBuilder::Build(VkDevice device, VkRenderPass renderPass)
+//bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline)
 {
     VkPipelineViewportStateCreateInfo pipelineViewportStateCreateInfo = {};
     pipelineViewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -186,24 +187,24 @@ bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipel
     pipelineCreateInfo.subpass = 0;
     pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
 
+    Pipeline pipeline;
     if (vkCreateGraphicsPipelines(
         device,
         VK_NULL_HANDLE,
         1,
         &pipelineCreateInfo,
         nullptr,
-        pipeline) != VK_SUCCESS)
+        &pipeline.pipeline) != VK_SUCCESS)
     {
-        pipeline = VK_NULL_HANDLE;
-        std::cerr << "PipelineBuilder: Failed to create pipeline\n";
-        return false;
+        pipeline.pipeline = VK_NULL_HANDLE;
+        return std::unexpected("PipelineBuilder: Failed to create pipeline\n");
     }
 
     _deletionQueue.Push([=]()
     {
         std::cout << "Destroying pipeline\n";
-        vkDestroyPipeline(device, *pipeline, nullptr);
+        vkDestroyPipeline(device, pipeline.pipeline, nullptr);
     });
 
-    return true;   
+    return pipeline;   
 }

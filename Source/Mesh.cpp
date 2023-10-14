@@ -9,29 +9,29 @@ VertexInputDescription VertexPositionNormalColor::GetVertexInputDescription()
     inputBindingDescription.stride = sizeof(VertexPositionNormalColor);
     inputBindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    vertexInputDescription.Bindings.push_back(inputBindingDescription);
+    vertexInputDescription.bindings.push_back(inputBindingDescription);
 
     VkVertexInputAttributeDescription positionAttribute = {};
     positionAttribute.binding = 0;
     positionAttribute.location = 0;
     positionAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    positionAttribute.offset = offsetof(VertexPositionNormalColor, Position);
+    positionAttribute.offset = offsetof(VertexPositionNormalColor, position);
 
     VkVertexInputAttributeDescription normalAttribute = {};
     normalAttribute.binding = 0;
     normalAttribute.location = 1;
     normalAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    normalAttribute.offset = offsetof(VertexPositionNormalColor, Normal);
+    normalAttribute.offset = offsetof(VertexPositionNormalColor, normal);
 
     VkVertexInputAttributeDescription colorAttribute = {};
     colorAttribute.binding = 0;
     colorAttribute.location = 2;
     colorAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    colorAttribute.offset = offsetof(VertexPositionNormalColor, Color);
+    colorAttribute.offset = offsetof(VertexPositionNormalColor, color);
 
-    vertexInputDescription.Attributes.push_back(positionAttribute);
-    vertexInputDescription.Attributes.push_back(normalAttribute);
-    vertexInputDescription.Attributes.push_back(colorAttribute);
+    vertexInputDescription.attributes.push_back(positionAttribute);
+    vertexInputDescription.attributes.push_back(normalAttribute);
+    vertexInputDescription.attributes.push_back(colorAttribute);
 
     return vertexInputDescription;
 }
@@ -45,29 +45,29 @@ VertexInputDescription VertexPositionNormalUv::GetVertexInputDescription()
     inputBindingDescription.stride = sizeof(VertexPositionNormalUv);
     inputBindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    vertexInputDescription.Bindings.push_back(inputBindingDescription);
+    vertexInputDescription.bindings.push_back(inputBindingDescription);
 
     VkVertexInputAttributeDescription positionAttribute = {};
     positionAttribute.binding = 0;
     positionAttribute.location = 0;
     positionAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    positionAttribute.offset = offsetof(VertexPositionNormalUv, Position);
+    positionAttribute.offset = offsetof(VertexPositionNormalUv, position);
 
     VkVertexInputAttributeDescription normalAttribute = {};
     normalAttribute.binding = 0;
     normalAttribute.location = 1;
     normalAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    normalAttribute.offset = offsetof(VertexPositionNormalUv, Normal);
+    normalAttribute.offset = offsetof(VertexPositionNormalUv, normal);
 
     VkVertexInputAttributeDescription uvAttribute = {};
     uvAttribute.binding = 0;
     uvAttribute.location = 2;
     uvAttribute.format = VK_FORMAT_R32G32_SFLOAT;
-    uvAttribute.offset = offsetof(VertexPositionNormalUv, Uv);
+    uvAttribute.offset = offsetof(VertexPositionNormalUv, uv);
 
-    vertexInputDescription.Attributes.push_back(positionAttribute);
-    vertexInputDescription.Attributes.push_back(normalAttribute);
-    vertexInputDescription.Attributes.push_back(uvAttribute);
+    vertexInputDescription.attributes.push_back(positionAttribute);
+    vertexInputDescription.attributes.push_back(normalAttribute);
+    vertexInputDescription.attributes.push_back(uvAttribute);
 
     return vertexInputDescription;
 }

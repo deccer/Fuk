@@ -3,23 +3,29 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <vk_mem_alloc.h>
 #include <volk.h>
 #include <VkBootstrap.h>
-
-#include <vector>
-#include <cstdint>
-#include <string>
-#include <expected>
-
-#include <vk_mem_alloc.h>
-
-#include "DeletionQueue.hpp"
-#include "Mesh.hpp"
 
 #include <fastgltf/glm_element_traits.hpp>
 #include <fastgltf/parser.hpp>
 #include <fastgltf/tools.hpp>
 #include <fastgltf/types.hpp>
+
+#include <vector>
+#include <cstdint>
+#include <string>
+#include <expected>
+#include <unordered_map>
+
+#include "DeletionQueue.hpp"
+#include "Types.hpp"
+#include "Pipeline.hpp"
+#include "Mesh.hpp"
+#include "Renderable.hpp"
+#include "Frame.hpp"
+
+constexpr uint32_t FRAME_COUNT = 2;
 
 class Engine
 {
@@ -29,16 +35,22 @@ public:
     bool Draw();
     void Unload();
 
-    GLFWwindow* GetWindow();    
+    GLFWwindow* GetWindow();
+
+    Mesh* GetMesh(const std::string& name);
 
 private:
+    std::vector<Renderable> _renderables;
+    std::unordered_map<std::string, std::vector<std::string>> _modelNameToMeshNameMap;
+    std::unordered_map<std::string, Mesh> _meshNameToMeshMap;
+
     int32_t _frameIndex{0};
     VkExtent2D _windowExtent{1920, 1080};
     bool _vsync{true};
     std::string _windowTitle{"Fuk"};
     DeletionQueue _deletionQueue;
 
-    GLFWwindow* _window;
+    GLFWwindow* _window{nullptr};
     VkInstance _instance;
 #ifdef _DEBUG
     VkDebugUtilsMessengerEXT _debugMessenger;
@@ -58,15 +70,8 @@ private:
     VkQueue _graphicsQueue;
     uint32_t _graphicsQueueFamily;
 
-    VkCommandPool _commandPool;
-    VkCommandBuffer _mainCommandBuffer;
-
     VkRenderPass _renderPass;
     std::vector<VkFramebuffer> _framebuffers;
-
-    VkSemaphore _presentSemaphore;
-    VkSemaphore _renderSemaphore;
-    VkFence _renderFence;
 
     VkShaderModule _simpleVertexShaderModule;
     VkShaderModule _simpleFragmentShaderModule;
@@ -77,7 +82,9 @@ private:
     VmaAllocator _allocator;
 
     VkPipeline _meshPipeline;
-    std::vector<Mesh> _meshes;
+
+    Frame _frames[FRAME_COUNT];
+    Frame& GetCurrentFrame();
 
     template<typename T>
     std::expected<AllocatedBuffer, std::string> CreateBuffer(
@@ -96,27 +103,27 @@ private:
 
         AllocatedBuffer buffer;
         if (vmaCreateBuffer(_allocator, &bufferCreateInfo, &bufferAllocationCreateInfo,
-            &buffer.Buffer,
-            &buffer.Allocation,
+            &buffer.buffer,
+            &buffer.allocation,
             nullptr) != VK_SUCCESS)
         {
             return std::unexpected("Vulkan: Failed to create buffer");
         }
 
-        SetDebugName(VkObjectType::VK_OBJECT_TYPE_BUFFER, buffer.Buffer, label);
+        SetDebugName(VkObjectType::VK_OBJECT_TYPE_BUFFER, buffer.buffer, label);
 
         void* dataPtr = nullptr;
-        if (vmaMapMemory(_allocator, buffer.Allocation, &dataPtr) != VK_SUCCESS)
+        if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
         {
             return std::unexpected("Vulkan: Failed to map buffer");
         }
 
         memcpy(dataPtr, data.data(), data.size() * sizeof(T));
-        vmaUnmapMemory(_allocator, buffer.Allocation);    
+        vmaUnmapMemory(_allocator, buffer.allocation);    
 
         _deletionQueue.Push([=]()
         {
-            vmaDestroyBuffer(_allocator, buffer.Buffer, buffer.Allocation);
+            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
         });
 
         return buffer;
@@ -137,8 +144,10 @@ private:
     bool InitializeSynchronizationStructures();
     bool InitializePipelines();
 
-    bool LoadMeshFromFile(const std::string& filePath);
+    bool LoadMeshFromFile(const std::string& modelName, const std::string& filePath);
 
     bool TryLoadShaderModule(const std::string& filePath, VkShaderModule* shaderModule);
     void SetDebugName(VkObjectType objectType, void* object, const std::string& debugName);
+
+    void DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count);
 };

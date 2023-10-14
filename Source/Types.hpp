@@ -7,28 +7,28 @@
 
 struct VertexInputDescription
 {
-	std::vector<VkVertexInputBindingDescription> Bindings;
-	std::vector<VkVertexInputAttributeDescription> Attributes;
+	std::vector<VkVertexInputBindingDescription> bindings;
+	std::vector<VkVertexInputAttributeDescription> attributes;
 
-	VkPipelineVertexInputStateCreateFlags Flags = 0;
+	VkPipelineVertexInputStateCreateFlags flags = 0;
 };
 
 struct AllocatedBuffer
 {
-    VkBuffer Buffer;
-    VmaAllocation Allocation;
+    VkBuffer buffer;
+    VmaAllocation allocation;
 };
 
 struct AllocatedImage
 {
-	VkImage Image;
-	VkImageView ImageView;
-	VmaAllocation Allocation;
+	VkImage image;
+	VkImageView imageView;
+	VmaAllocation allocation;
 };
 
 struct MeshPushConstants
 {
-	glm::mat4 ProjectionMatrix;
-	glm::mat4 ViewMatrix;
-	glm::mat4 WorldMatrix;
+	glm::mat4 projectionMatrix;
+	glm::mat4 viewMatrix;
+	glm::mat4 worldMatrix;
 };
