@@ -15,15 +15,15 @@ struct VertexInputDescription
 
 struct AllocatedBuffer
 {
-    VkBuffer buffer;
-    VmaAllocation allocation;
+    VkBuffer buffer = {};
+    VmaAllocation allocation = {};
 };
 
 struct AllocatedImage
 {
-	VkImage image;
-	VkImageView imageView;
-	VmaAllocation allocation;
+	VkImage image = {};
+	VkImageView imageView = {};
+	VmaAllocation allocation = {};
 };
 
 struct MeshPushConstants

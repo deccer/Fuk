@@ -7,7 +7,7 @@ struct Pipeline;
 
 struct Renderable
 {
-    Mesh* mesh;
-    Pipeline* pipeline;
-    glm::mat4 worldMatrix;
+    Mesh* mesh = nullptr;
+    Pipeline* pipeline = nullptr;
+    glm::mat4 worldMatrix = glm::mat4(1.0f);
 };

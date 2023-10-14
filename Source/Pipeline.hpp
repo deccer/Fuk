@@ -4,6 +4,6 @@
 
 struct Pipeline
 {
-	VkPipeline pipeline;
-	VkPipelineLayout pipelineLayout;
+	VkPipeline pipeline = {};
+	VkPipelineLayout pipelineLayout = {};
 };
