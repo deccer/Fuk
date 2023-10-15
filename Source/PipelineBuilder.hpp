@@ -12,7 +12,7 @@
 class PipelineBuilder
 {
 public:
-    PipelineBuilder(const DeletionQueue& deletionQueue)
+    PipelineBuilder(DeletionQueue& deletionQueue)
         : _deletionQueue(deletionQueue)
     {
     }
@@ -25,12 +25,14 @@ public:
     PipelineBuilder& WithoutMultisampling();
     PipelineBuilder& WithoutBlending();
     PipelineBuilder& WithDepthTestingEnabled(VkCompareOp compareOperation = VkCompareOp::VK_COMPARE_OP_LESS);
-    PipelineBuilder& ForPipelineLayout(VkPipelineLayout pipelineLayout);
 
-    std::expected<Pipeline, std::string> Build(VkDevice device, VkRenderPass renderPass);
+    std::expected<Pipeline, std::string> Build(
+        const std::string& label,
+        VkDevice device,
+        VkRenderPass renderPass);
 
 private:
-    DeletionQueue _deletionQueue;
+    DeletionQueue& _deletionQueue;
 
     std::vector<VkPipelineShaderStageCreateInfo> _shaderStages;
     VkPipelineVertexInputStateCreateInfo _vertexInputInfo;
@@ -41,5 +43,4 @@ private:
     VkPipelineDepthStencilStateCreateInfo _depthStencil;
     VkPipelineColorBlendAttachmentState _colorBlendAttachment;
     VkPipelineMultisampleStateCreateInfo _multisampling;
-    VkPipelineLayout _pipelineLayout;
 };

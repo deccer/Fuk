@@ -1,6 +1,8 @@
 #include "PipelineBuilder.hpp"
+#include "Engine.hpp"
 
 #include <iostream>
+#include <format>
 
 VkPipelineShaderStageCreateInfo CreateShaderStageCreateInfo(VkShaderStageFlagBits stage, VkShaderModule shaderModule)
 {
@@ -129,12 +131,6 @@ PipelineBuilder& PipelineBuilder::WithoutBlending()
     return *this;
 }
 
-PipelineBuilder& PipelineBuilder::ForPipelineLayout(VkPipelineLayout pipelineLayout)
-{
-    _pipelineLayout = pipelineLayout;
-    return *this;
-}
-
 PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOperation)
 {
     _depthStencil = {};
@@ -151,9 +147,41 @@ PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOpe
     return *this;
 }
 
-std::expected<Pipeline, std::string> PipelineBuilder::Build(VkDevice device, VkRenderPass renderPass)
-//bool PipelineBuilder::TryBuild(VkDevice device, VkRenderPass renderPass, VkPipeline* pipeline)
+std::expected<Pipeline, std::string> PipelineBuilder::Build(
+    const std::string& label,
+    VkDevice device,
+    VkRenderPass renderPass)
 {
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutCreateInfo.pNext = nullptr;
+
+    pipelineLayoutCreateInfo.flags = 0;
+    pipelineLayoutCreateInfo.setLayoutCount = 0;
+    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(MeshPushConstants);
+    pushConstantRange.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
+
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
+
+    Pipeline pipeline;
+    if (vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipeline.pipelineLayout) != VK_SUCCESS)
+    {
+        return std::unexpected("Vulkan: Failed to create pipeline layout");
+    }
+
+    auto debugLabel = std::format("{}_PipelineLayout", label);
+    SetDebugName(device, pipeline.pipelineLayout, debugLabel);    
+
+    _deletionQueue.Push([=]()
+    {
+        vkDestroyPipelineLayout(device, pipeline.pipelineLayout, nullptr);
+    });
+
     VkPipelineViewportStateCreateInfo pipelineViewportStateCreateInfo = {};
     pipelineViewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     pipelineViewportStateCreateInfo.pNext = nullptr;
@@ -182,12 +210,11 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(VkDevice device, VkR
     pipelineCreateInfo.pMultisampleState = &_multisampling;
     pipelineCreateInfo.pColorBlendState = &pipelineColorBlendStateCreateInfo;
     pipelineCreateInfo.pDepthStencilState = &_depthStencil;
-    pipelineCreateInfo.layout = _pipelineLayout;
+    pipelineCreateInfo.layout = pipeline.pipelineLayout;
     pipelineCreateInfo.renderPass = renderPass;
     pipelineCreateInfo.subpass = 0;
     pipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-    Pipeline pipeline;
     if (vkCreateGraphicsPipelines(
         device,
         VK_NULL_HANDLE,
@@ -197,12 +224,14 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(VkDevice device, VkR
         &pipeline.pipeline) != VK_SUCCESS)
     {
         pipeline.pipeline = VK_NULL_HANDLE;
-        return std::unexpected("PipelineBuilder: Failed to create pipeline\n");
+        return std::unexpected("PipelineBuilder: Failed to create pipeline");
     }
+
+    debugLabel = std::format("{}_Pipeline", label);
+    SetDebugName(device, pipeline.pipeline, debugLabel);    
 
     _deletionQueue.Push([=]()
     {
-        std::cout << "Destroying pipeline\n";
         vkDestroyPipeline(device, pipeline.pipeline, nullptr);
     });
 

@@ -173,7 +173,7 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
         return std::unexpected("Vulkan: Unable to create image");
     }
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE, image.image, label);
+    SetDebugName(_device, image.image, label);
 
     VkImageViewCreateInfo imageViewCreateInfo = {};
     imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -194,7 +194,13 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
     }
 
     auto viewLabel = std::format("{}_ImageView", label);
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_IMAGE_VIEW, image.imageView, viewLabel);
+    SetDebugName(_device, image.imageView, viewLabel);
+
+    _deletionQueue.Push([=]()
+    {
+        vkDestroyImageView(_device, image.imageView, nullptr);
+        vmaDestroyImage(_allocator, image.image, image.allocation);
+    });
 
     return image;
 }
@@ -298,26 +304,28 @@ bool Engine::Initialize()
         return false;
     }
 
-    if (!InitializePipelines())
-    {
-        return false;
-    }
-
     return true;
 }
 
 bool Engine::Load()
 {
-    if (!TryLoadShaderModule("data/shaders/Simple.vs.glsl.spv", &_simpleVertexShaderModule))
+    auto loadShaderModuleResult = LoadShaderModule("data/shaders/Simple.vs.glsl.spv");
+    if (!loadShaderModuleResult.has_value())
     {
-        std::cout << "Engine: Failed to load Simple.vs.glsl.spv\n";
+        std::cout << loadShaderModuleResult.error();
         return false;
     }
-    if (!TryLoadShaderModule("data/shaders/Simple.fs.glsl.spv", &_simpleFragmentShaderModule))
+
+    _simpleVertexShaderModule = loadShaderModuleResult.value();
+
+    loadShaderModuleResult = LoadShaderModule("data/shaders/Simple.fs.glsl.spv");
+    if (!loadShaderModuleResult.has_value())
     {
-        std::cout << "Engine: Failed to load Simple.fs.glsl.spv\n";
+        std::cout << loadShaderModuleResult.error();
         return false;
     }
+
+    _simpleFragmentShaderModule = loadShaderModuleResult.value();
 
     VkViewport viewport =
     {
@@ -340,19 +348,33 @@ bool Engine::Load()
         .WithDepthTestingEnabled(VkCompareOp::VK_COMPARE_OP_LESS)
         .WithoutBlending()
         .WithoutMultisampling()
-        .ForPipelineLayout(_trianglePipelineLayout)
-        .Build(_device, _renderPass);
+        .Build("OpaquePipeline", _device, _renderPass);
     if (!pipelineResult.has_value())
     {
         std::cout << pipelineResult.error();
         return false;
     }
 
-    _trianglePipeline = pipelineResult.value().pipeline;
-
     if (!LoadMeshFromFile("SM_Cubes", "data/models/deccer-cubes/SM_Deccer_Cubes_Textured_Complex.gltf"))
     {
         return false;
+    }
+
+    auto meshes = GetModel("SM_Cubes");
+    auto meshIndex = 0;
+    auto originTransform = glm::translate(glm::mat4(1.0f), glm::vec3(-20.0f, 0.0f, 0.0f));
+    for (size_t i = 0; i < 3; i++)
+    {
+        auto rootTransform = glm::translate(originTransform, glm::vec3(meshIndex * 10.0f, 0.0f, 0.0f));    
+        for (auto& mesh : meshes)
+        {
+            Renderable renderable;
+            renderable.pipeline = pipelineResult.value();
+            renderable.mesh = mesh;
+            renderable.worldMatrix = rootTransform * mesh->worldMatrix;
+            _renderables.push_back(renderable);
+        }
+        meshIndex++;        
     }
 
     return true;
@@ -403,8 +425,10 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
 
     for (auto nodeIndex : asset.scenes[0].nodeIndices)
     {
-      nodeStack.emplace(&asset.nodes[nodeIndex], rootTransform);
-    }    
+        nodeStack.emplace(&asset.nodes[nodeIndex], rootTransform);
+    }
+
+    std::vector<std::string> meshNames;
     
     while (!nodeStack.empty())
     {
@@ -422,7 +446,6 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
 
         if (node->meshIndex.has_value())
         {
-            std::vector<std::string> meshNames(node->children.size());
             for (const fastgltf::Mesh& fgMesh = asset.meshes[node->meshIndex.value()];
                  const auto& primitive : fgMesh.primitives)
             {
@@ -463,9 +486,10 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
                 _meshNameToMeshMap.emplace(meshName, mesh);
             }
 
-            _modelNameToMeshNameMap.emplace(modelName, meshNames);
         }
     }
+
+    _modelNameToMeshNameMap.emplace(modelName, meshNames);
 
     return true;
 }
@@ -679,7 +703,7 @@ bool Engine::InitializeVulkan()
     _graphicsQueue = vkbDevice.get_queue(vkb::QueueType::graphics).value();
     _graphicsQueueFamily = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_QUEUE, _graphicsQueue, "Graphics Queue");    
+    SetDebugName(_device, _graphicsQueue, "Graphics Queue");    
 
     static VmaVulkanFunctions vmaVulkanFunctions = {};
     vmaVulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
@@ -720,7 +744,12 @@ bool Engine::InitializeSwapchain()
     _swapchainImageViews = vkbSwapchain.get_image_views().value();
     _swapchainImageFormat = vkbSwapchain.image_format;
 
-    SetDebugName(VkObjectType::VK_OBJECT_TYPE_SWAPCHAIN_KHR, _swapchain, "SwapChain");
+    SetDebugName(_device, _swapchain, "SwapChain");
+
+    _deletionQueue.Push([=]()
+    {
+        vkDestroySwapchainKHR(_device, _swapchain, nullptr);
+    });
 
     return true;
 }
@@ -745,7 +774,7 @@ bool Engine::InitializeCommandBuffers()
             return false;
         }
 
-        SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_POOL, &_frames[i].commandPool, std::format("CommandPool_{}\0", i));
+        SetDebugName(_device, _frames[i].commandPool, std::format("CommandPool_{}\0", i));
 
         VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
         commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -763,7 +792,7 @@ bool Engine::InitializeCommandBuffers()
             return false;
         }
 
-        SetDebugName(VkObjectType::VK_OBJECT_TYPE_COMMAND_BUFFER, &_frames[i].commandBuffer, std::format("CommandBuffer_{}", i));
+        SetDebugName(_device, _frames[i].commandBuffer, std::format("CommandBuffer_{}", i));
 
         _deletionQueue.Push([=]()
         {
@@ -854,6 +883,13 @@ bool Engine::InitializeRenderPass()
         return false;
     }
 
+    SetDebugName(_device, _renderPass, "RenderPass");
+
+    _deletionQueue.Push([=]()
+    {
+        vkDestroyRenderPass(_device, _renderPass, nullptr);
+    });
+
     return true;
 }
 
@@ -935,62 +971,28 @@ bool Engine::InitializeSynchronizationStructures()
     return true;
 }
 
-bool Engine::InitializePipelines()
-{
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCreateInfo.pNext = nullptr;
-
-    pipelineLayoutCreateInfo.flags = 0;
-    pipelineLayoutCreateInfo.setLayoutCount = 0;
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
-
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(MeshPushConstants);
-    pushConstantRange.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
-
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
-    if (vkCreatePipelineLayout(_device, &pipelineLayoutCreateInfo, nullptr, &_trianglePipelineLayout) != VK_SUCCESS)
-    {
-        std::cerr << "Vulkan: Failed to create pipeline layout\n";
-        return false;
-    }
-
-    return true;
-}
-
 void Engine::Unload()
 {
     vkDeviceWaitIdle(_device);
 
     _deletionQueue.Flush();
     
-    vkDestroyShaderModule(_device, _simpleVertexShaderModule, nullptr);
-    vkDestroyShaderModule(_device, _simpleFragmentShaderModule, nullptr);
-
-    vkDestroyPipeline(_device, _trianglePipeline, nullptr);
-    vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);    
-
     for (size_t imageViewIndex = 0; imageViewIndex < _swapchainImageViews.size(); imageViewIndex++)
     {
         vkDestroyFramebuffer(_device, _framebuffers[imageViewIndex], nullptr);
         vkDestroyImageView(_device, _swapchainImageViews[imageViewIndex], nullptr);
     }
 
-    vkDestroySwapchainKHR(_device, _swapchain, nullptr);
-    vkDestroyRenderPass(_device, _renderPass, nullptr);
+    vmaDestroyAllocator(_allocator);    
 
-    vmaDestroyAllocator(_allocator);
-
+    vkDestroySurfaceKHR(_instance, _surface, nullptr);    
     vkDestroyDevice(_device, nullptr);
-    vkDestroySurfaceKHR(_instance, _surface, nullptr);
+
 #ifdef _DEBUG
     vkb::destroy_debug_utils_messenger(_instance, _debugMessenger);
 #endif
     vkDestroyInstance(_instance, nullptr);
+
     if (_window != nullptr)
     {
         glfwDestroyWindow(_window);
@@ -998,48 +1000,35 @@ void Engine::Unload()
     glfwTerminate();
 }
 
-bool Engine::TryLoadShaderModule(const std::string& filePath, VkShaderModule* shaderModule)
+std::expected<VkShaderModule, std::string> Engine::LoadShaderModule(const std::string& filePath)
 {
     auto buffer = ReadFile<uint32_t>(filePath);
 
     VkShaderModuleCreateInfo shaderModuleCreateInfo = {};
     shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     shaderModuleCreateInfo.pNext = nullptr;
-    shaderModuleCreateInfo.codeSize = buffer.size();// * sizeof(uint32_t);
+    shaderModuleCreateInfo.codeSize = buffer.size();
     shaderModuleCreateInfo.pCode = buffer.data();
 
-    VkShaderModule shaderModuleTemp;
-    if (vkCreateShaderModule(_device, &shaderModuleCreateInfo, nullptr, &shaderModuleTemp) != VK_SUCCESS)
+    VkShaderModule shaderModule;
+    if (vkCreateShaderModule(_device, &shaderModuleCreateInfo, nullptr, &shaderModule) != VK_SUCCESS)
     {
-        return false;
+        return std::unexpected("Vulkan: Failed to create shader module");
     }
 
-    *shaderModule = shaderModuleTemp;
-    return true;
+    SetDebugName(_device, shaderModule, filePath);
+
+    _deletionQueue.Push([=]()
+    {
+        vkDestroyShaderModule(_device, shaderModule, nullptr);
+    });
+
+    return shaderModule;
 }
 
 GLFWwindow* Engine::GetWindow()
 {
     return _window;
-}
-
-void Engine::SetDebugName(VkObjectType objectType, void* object, const std::string& debugName)
-{
-#ifdef _DEBUG
-    const VkDebugUtilsObjectNameInfoEXT debugUtilsObjectNameInfo =
-    {
-        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-        .pNext = NULL,
-        .objectType = objectType,
-        .objectHandle = (uint64_t)object,
-        .pObjectName = debugName.c_str(),
-    };
-
-    if (vkSetDebugUtilsObjectNameEXT(_device, &debugUtilsObjectNameInfo) != VK_SUCCESS)
-    {
-        std::cerr << "Vulkan: Unable to set debug util object name\n";
-    }
-#endif
 }
 
 void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count)
@@ -1048,15 +1037,15 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
     pushConstants.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
     pushConstants.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
 
-	Mesh* lastMesh = nullptr;
-	Pipeline* lastPipeline = nullptr;
-	for (size_t i = 0; i < count; i++)
+    Mesh* lastMesh = nullptr;
+    Pipeline* lastPipeline = nullptr;
+    for (size_t i = 0; i < count; i++)
     {
         auto& renderable = first[i];
-        if (renderable.pipeline != lastPipeline)
+        if (lastPipeline == nullptr || renderable.pipeline.pipeline != lastPipeline->pipeline)
         {
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline->pipeline);
-            lastPipeline = renderable.pipeline;
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipeline);
+            lastPipeline = &renderable.pipeline;
         }
 
         if (renderable.mesh != lastMesh)
@@ -1067,10 +1056,33 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         }
 
         pushConstants.worldMatrix = renderable.worldMatrix;
-        vkCmdPushConstants(commandBuffer, _trianglePipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &pushConstants);
+        vkCmdPushConstants(commandBuffer, renderable.pipeline.pipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &pushConstants);
 
         vkCmdDrawIndexed(commandBuffer, renderable.mesh->indices.size(), 1, 0, 0, 0);
     }
+}
+
+std::vector<Mesh*> Engine::GetModel(const std::string& name)
+{
+    std::vector<Mesh*> meshes;
+
+    auto it = _modelNameToMeshNameMap.find(name);
+    if (it == _modelNameToMeshNameMap.end())
+    {
+        return meshes;
+    }
+
+    auto meshNames = (*it).second;
+    for (auto& meshName : meshNames)
+    {
+        auto mesh = GetMesh(meshName);
+        if (mesh != nullptr)
+        {
+            meshes.push_back(mesh);
+        }
+    }
+
+    return meshes;
 }
 
 Mesh* Engine::GetMesh(const std::string& name)

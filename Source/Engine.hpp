@@ -27,6 +27,23 @@
 
 constexpr uint32_t FRAME_COUNT = 2;
 
+template<typename T>
+void SetDebugName(VkDevice device, T object, const std::string& debugName)
+{
+#ifdef _DEBUG
+    const VkDebugUtilsObjectNameInfoEXT debugUtilsObjectNameInfo =
+    {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .pNext = NULL,
+        .objectType = VulkanObjectType<T>::objectType,
+        .objectHandle = (uint64_t)object,
+        .pObjectName = debugName.c_str(),
+    };
+
+    vkSetDebugUtilsObjectNameEXT(device, &debugUtilsObjectNameInfo);
+#endif
+}
+
 class Engine
 {
 public:
@@ -38,6 +55,7 @@ public:
     GLFWwindow* GetWindow();
 
     Mesh* GetMesh(const std::string& name);
+    std::vector<Mesh*> GetModel(const std::string& name);
 
 private:
     std::vector<Renderable> _renderables;
@@ -76,9 +94,6 @@ private:
     VkShaderModule _simpleVertexShaderModule;
     VkShaderModule _simpleFragmentShaderModule;
 
-    VkPipelineLayout _trianglePipelineLayout;
-    VkPipeline _trianglePipeline;
-
     VmaAllocator _allocator;
 
     VkPipeline _meshPipeline;
@@ -110,7 +125,7 @@ private:
             return std::unexpected("Vulkan: Failed to create buffer");
         }
 
-        SetDebugName(VkObjectType::VK_OBJECT_TYPE_BUFFER, buffer.buffer, label);
+        SetDebugName(_device, buffer.buffer, label);
 
         void* dataPtr = nullptr;
         if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
@@ -142,12 +157,10 @@ private:
     bool InitializeRenderPass();
     bool InitializeFramebuffers();
     bool InitializeSynchronizationStructures();
-    bool InitializePipelines();
 
     bool LoadMeshFromFile(const std::string& modelName, const std::string& filePath);
 
-    bool TryLoadShaderModule(const std::string& filePath, VkShaderModule* shaderModule);
-    void SetDebugName(VkObjectType objectType, void* object, const std::string& debugName);
+    std::expected<VkShaderModule, std::string> LoadShaderModule(const std::string& filePath);
 
     void DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count);
 };
