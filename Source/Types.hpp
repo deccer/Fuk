@@ -7,10 +7,10 @@
 
 struct VertexInputDescription
 {
-	std::vector<VkVertexInputBindingDescription> bindings;
-	std::vector<VkVertexInputAttributeDescription> attributes;
+    std::vector<VkVertexInputBindingDescription> bindings;
+    std::vector<VkVertexInputAttributeDescription> attributes;
 
-	VkPipelineVertexInputStateCreateFlags flags = 0;
+    VkPipelineVertexInputStateCreateFlags flags = 0;
 };
 
 struct AllocatedBuffer
@@ -21,16 +21,21 @@ struct AllocatedBuffer
 
 struct AllocatedImage
 {
-	VkImage image = {};
-	VkImageView imageView = {};
-	VmaAllocation allocation = {};
+    VkImage image = {};
+    VkImageView imageView = {};
+    VmaAllocation allocation = {};
 };
 
 struct MeshPushConstants
 {
-	glm::mat4 projectionMatrix;
-	glm::mat4 viewMatrix;
-	glm::mat4 worldMatrix;
+    glm::mat4 worldMatrix;
+};
+
+struct GpuCameraData
+{
+    glm::mat4 projectionMatrix;
+    glm::mat4 viewMatrix;
+    glm::mat4 viewProjectionMatrix;
 };
 
 template <typename>
@@ -71,3 +76,9 @@ struct VulkanObjectType<VkImage> { static constexpr const VkObjectType objectTyp
 
 template <>
 struct VulkanObjectType<VkImageView> { static constexpr const VkObjectType objectType = VK_OBJECT_TYPE_IMAGE_VIEW; };
+
+template <>
+struct VulkanObjectType<VkDescriptorSetLayout> { static constexpr const VkObjectType objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT; };
+
+template <>
+struct VulkanObjectType<VkDescriptorSet> { static constexpr const VkObjectType objectType = VK_OBJECT_TYPE_DESCRIPTOR_SET; };

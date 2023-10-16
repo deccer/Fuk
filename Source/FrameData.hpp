@@ -2,7 +2,9 @@
 
 #include <volk.h>
 
-struct Frame
+#include "Types.hpp"
+
+struct FrameData
 {
     VkSemaphore presentSemaphore = {};
     VkSemaphore renderSemaphore = {};
@@ -10,4 +12,7 @@ struct Frame
 
     VkCommandPool commandPool = {};
     VkCommandBuffer commandBuffer = {};
+
+    AllocatedBuffer cameraBuffer = {};
+    VkDescriptorSet globalDescriptorSet;
 };

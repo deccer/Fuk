@@ -299,6 +299,11 @@ bool Engine::Initialize()
         return false;
     }
 
+    if (!InitializeDescriptors())
+    {
+        return false;
+    }
+
     if (!InitializeSynchronizationStructures())
     {
         return false;
@@ -348,7 +353,7 @@ bool Engine::Load()
         .WithDepthTestingEnabled(VkCompareOp::VK_COMPARE_OP_LESS)
         .WithoutBlending()
         .WithoutMultisampling()
-        .Build("OpaquePipeline", _device, _renderPass);
+        .Build("OpaquePipeline", _device, _renderPass, _globalDescriptorSetLayout);
     if (!pipelineResult.has_value())
     {
         std::cout << pipelineResult.error();
@@ -496,16 +501,16 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
 
 bool Engine::Draw()
 {
-    Frame frame = GetCurrentFrame();
+    FrameData frameData = GetCurrentFrameData();
 
-    VkResult result = vkWaitForFences(_device, 1, &frame.renderFence, true, 1000000000);
+    VkResult result = vkWaitForFences(_device, 1, &frameData.renderFence, true, 1000000000);
     if (result != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to wait for render fence\n" << result << "\n";
         return false;
     }
 
-    if (vkResetFences(_device, 1, &frame.renderFence) != VK_SUCCESS)
+    if (vkResetFences(_device, 1, &frameData.renderFence) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to reset render fence\n";
         return false;
@@ -516,7 +521,7 @@ bool Engine::Draw()
         _device,
         _swapchain,
         1000000000,
-        frame.presentSemaphore,
+        frameData.presentSemaphore,
         nullptr,
         &swapchainImageIndex) != VK_SUCCESS)
     {
@@ -524,7 +529,7 @@ bool Engine::Draw()
         return false;
     }
 
-    if (vkResetCommandBuffer(frame.commandBuffer, 0) != VK_SUCCESS)
+    if (vkResetCommandBuffer(frameData.commandBuffer, 0) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Unable to reset command buffer\n";
         return false;
@@ -536,7 +541,7 @@ bool Engine::Draw()
     commandBufferBeginInfo.pInheritanceInfo = nullptr;
     commandBufferBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    if (vkBeginCommandBuffer(frame.commandBuffer, &commandBufferBeginInfo) != VK_SUCCESS)
+    if (vkBeginCommandBuffer(frameData.commandBuffer, &commandBufferBeginInfo) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to begin command buffer\n";
         return false;
@@ -563,13 +568,13 @@ bool Engine::Draw()
     renderPassBeginInfo.clearValueCount = 2;
     renderPassBeginInfo.pClearValues = &clearValues[0];
 
-    vkCmdBeginRenderPass(frame.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);    
+    vkCmdBeginRenderPass(frameData.commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);    
 
-    DrawRenderables(frame.commandBuffer, _renderables.data(), _renderables.size());
+    DrawRenderables(frameData.commandBuffer, _renderables.data(), _renderables.size());
 
-    vkCmdEndRenderPass(frame.commandBuffer);
+    vkCmdEndRenderPass(frameData.commandBuffer);
 
-    if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS)
+    if (vkEndCommandBuffer(frameData.commandBuffer) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to end command buffer\n";
         return false;
@@ -583,13 +588,13 @@ bool Engine::Draw()
 
     submitInfo.pWaitDstStageMask = &waitStageFlags;
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &frame.presentSemaphore;
+    submitInfo.pWaitSemaphores = &frameData.presentSemaphore;
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &frame.renderSemaphore;
+    submitInfo.pSignalSemaphores = &frameData.renderSemaphore;
     submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &frame.commandBuffer;
+    submitInfo.pCommandBuffers = &frameData.commandBuffer;
 
-    if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, frame.renderFence) != VK_SUCCESS)
+    if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, frameData.renderFence) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to submit to queue\n";
         return false;
@@ -602,7 +607,7 @@ bool Engine::Draw()
     presentInfo.pNext = nullptr;
     presentInfo.pSwapchains = &_swapchain;
     presentInfo.swapchainCount = 1;
-    presentInfo.pWaitSemaphores = &frame.renderSemaphore;
+    presentInfo.pWaitSemaphores = &frameData.renderSemaphore;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pImageIndices = &swapchainImageIndex;
 
@@ -762,43 +767,43 @@ bool Engine::InitializeCommandBuffers()
     commandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
     commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-	for (size_t i = 0; i < FRAME_COUNT; i++)
+    for (size_t i = 0; i < FRAME_COUNT; i++)
     {
         if (vkCreateCommandPool(
             _device,
             &commandPoolCreateInfo,
             nullptr,
-            &_frames[i].commandPool) != VK_SUCCESS)
+            &_frameDates[i].commandPool) != VK_SUCCESS)
         {
             std::cout << "Vulkan: Failed to create command pool\n";
             return false;
         }
 
-        SetDebugName(_device, _frames[i].commandPool, std::format("CommandPool_{}\0", i));
+        SetDebugName(_device, _frameDates[i].commandPool, std::format("CommandPool_{}\0", i));
 
         VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
         commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         commandBufferAllocateInfo.pNext = nullptr;
-        commandBufferAllocateInfo.commandPool = _frames[i].commandPool;
+        commandBufferAllocateInfo.commandPool = _frameDates[i].commandPool;
         commandBufferAllocateInfo.commandBufferCount = 1;
         commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 
         if(vkAllocateCommandBuffers(
             _device,
             &commandBufferAllocateInfo,
-            &_frames[i].commandBuffer) != VK_SUCCESS)
+            &_frameDates[i].commandBuffer) != VK_SUCCESS)
         {
             std::cout << "Vulkan: Failed to create command buffer\n";
             return false;
         }
 
-        SetDebugName(_device, _frames[i].commandBuffer, std::format("CommandBuffer_{}", i));
+        SetDebugName(_device, _frameDates[i].commandBuffer, std::format("CommandBuffer_{}", i));
 
         _deletionQueue.Push([=]()
         {
-			vkDestroyCommandPool(_device, _frames[i].commandPool, nullptr);
-		});
-	}    
+            vkDestroyCommandPool(_device, _frameDates[i].commandPool, nullptr);
+        });
+    }    
 
     return true;
 }
@@ -928,6 +933,99 @@ bool Engine::InitializeFramebuffers()
     return true;
 }
 
+bool Engine::InitializeDescriptors()
+{
+    std::vector<VkDescriptorPoolSize> descriptorPoolSizes =
+    {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 }
+    };
+
+    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {};
+    descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptorPoolCreateInfo.flags = 0;
+    descriptorPoolCreateInfo.maxSets = 16;
+    descriptorPoolCreateInfo.poolSizeCount = (uint32_t)descriptorPoolSizes.size();
+    descriptorPoolCreateInfo.pPoolSizes = descriptorPoolSizes.data();
+
+    if (vkCreateDescriptorPool(_device, &descriptorPoolCreateInfo, nullptr, &_descriptorPool) != VK_SUCCESS)
+    {
+        std::cerr << "Vulkan: Failed to create descriptor pool\n";
+        return false;
+    }
+
+    VkDescriptorSetLayoutBinding cameraBufferBinding = {};
+    cameraBufferBinding.binding = 0;
+    cameraBufferBinding.descriptorCount = 1;
+    cameraBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    cameraBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {};
+    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptorSetLayoutCreateInfo.pNext = nullptr;
+    descriptorSetLayoutCreateInfo.bindingCount = 1;
+    descriptorSetLayoutCreateInfo.flags = 0;
+    descriptorSetLayoutCreateInfo.pBindings = &cameraBufferBinding;
+
+    if (vkCreateDescriptorSetLayout(_device, &descriptorSetLayoutCreateInfo, nullptr, &_globalDescriptorSetLayout) != VK_SUCCESS)
+    {
+        std::cerr << "Vulkan: Failed to create descriptor set layout\n";
+        return false;
+    }
+
+    SetDebugName(_device, _globalDescriptorSetLayout, "GlobalDescriptorSetLayout");
+
+    _deletionQueue.Push([&]()
+    {
+        vkDestroyDescriptorSetLayout(_device, _globalDescriptorSetLayout, nullptr);
+        vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
+    });
+
+    for (size_t i = 0; i < FRAME_COUNT; i++)
+    {
+        auto createBufferResult = CreateBuffer<GpuCameraData>(
+            "GpuCameraData",
+            VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+        if (!createBufferResult.has_value())
+        {
+            return false;
+        }
+
+        _frameDates[i].cameraBuffer = createBufferResult.value();
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {};
+        descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descriptorSetAllocateInfo.pNext = nullptr;
+        descriptorSetAllocateInfo.descriptorPool = _descriptorPool;
+        descriptorSetAllocateInfo.descriptorSetCount = 1;
+        descriptorSetAllocateInfo.pSetLayouts = &_globalDescriptorSetLayout;
+
+        if (vkAllocateDescriptorSets(_device, &descriptorSetAllocateInfo, &_frameDates[i].globalDescriptorSet) != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: Failed to allocate descriptor sets\n";
+            return false;
+        }
+
+        VkDescriptorBufferInfo descriptorBufferInfo;
+        descriptorBufferInfo.buffer = _frameDates[i].cameraBuffer.buffer;
+        descriptorBufferInfo.offset = 0;
+        descriptorBufferInfo.range = sizeof(GpuCameraData);
+
+        VkWriteDescriptorSet writeDescriptorSet = {};
+        writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSet.pNext = nullptr;
+        writeDescriptorSet.dstBinding = 0;
+        writeDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
+        writeDescriptorSet.descriptorCount = 1;
+        writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSet.pBufferInfo = &descriptorBufferInfo;
+
+        vkUpdateDescriptorSets(_device, 1, &writeDescriptorSet, 0, nullptr);
+    }
+
+    return true;
+}
+
 bool Engine::InitializeSynchronizationStructures()
 {
     VkFenceCreateInfo fenceCreateInfo = {};
@@ -942,19 +1040,19 @@ bool Engine::InitializeSynchronizationStructures()
 
     for (size_t i = 0; i < FRAME_COUNT; i++)
     {
-        if (vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i].renderFence) != VK_SUCCESS)
+        if (vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frameDates[i].renderFence) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create render fence\n";
             return false;
         }
 
-        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i].presentSemaphore) != VK_SUCCESS)
+        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frameDates[i].presentSemaphore) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create present semaphore\n";
             return false;
         }
 
-        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i].renderSemaphore) != VK_SUCCESS)
+        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frameDates[i].renderSemaphore) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create render semaphore\n";
             return false;
@@ -962,9 +1060,9 @@ bool Engine::InitializeSynchronizationStructures()
 
         _deletionQueue.Push([=]()
         {
-            vkDestroyFence(_device, _frames[i].renderFence, nullptr);
-            vkDestroySemaphore(_device, _frames[i].presentSemaphore, nullptr);
-            vkDestroySemaphore(_device, _frames[i].renderSemaphore, nullptr);
+            vkDestroyFence(_device, _frameDates[i].renderFence, nullptr);
+            vkDestroySemaphore(_device, _frameDates[i].presentSemaphore, nullptr);
+            vkDestroySemaphore(_device, _frameDates[i].renderSemaphore, nullptr);
         });
     }
 
@@ -1034,8 +1132,20 @@ GLFWwindow* Engine::GetWindow()
 void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count)
 {
     MeshPushConstants pushConstants;
-    pushConstants.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
-    pushConstants.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+
+	GpuCameraData gpuCameraData;
+	gpuCameraData.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
+	gpuCameraData.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+	gpuCameraData.viewProjectionMatrix = gpuCameraData.projectionMatrix * gpuCameraData.viewMatrix;
+
+    auto& currentFrame = GetCurrentFrameData();
+
+	void* gpuCameraDataPtr = nullptr;
+	if (vmaMapMemory(_allocator, currentFrame.cameraBuffer.allocation, &gpuCameraDataPtr) == VK_SUCCESS)
+    {
+	    memcpy(gpuCameraDataPtr, &gpuCameraData, sizeof(GpuCameraData));
+	    vmaUnmapMemory(_allocator, currentFrame.cameraBuffer.allocation);
+    }
 
     Mesh* lastMesh = nullptr;
     Pipeline* lastPipeline = nullptr;
@@ -1046,6 +1156,8 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         {
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipeline);
             lastPipeline = &renderable.pipeline;
+
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 0, 1, &currentFrame.globalDescriptorSet, 0, nullptr);
         }
 
         if (renderable.mesh != lastMesh)
@@ -1093,7 +1205,7 @@ Mesh* Engine::GetMesh(const std::string& name)
         : &(*it).second;
 }
 
-Frame& Engine::GetCurrentFrame()
+FrameData& Engine::GetCurrentFrameData()
 {
-    return _frames[_frameIndex % FRAME_COUNT];
+    return _frameDates[_frameIndex % FRAME_COUNT];
 }

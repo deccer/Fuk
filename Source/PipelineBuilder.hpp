@@ -29,7 +29,8 @@ public:
     std::expected<Pipeline, std::string> Build(
         const std::string& label,
         VkDevice device,
-        VkRenderPass renderPass);
+        VkRenderPass renderPass,
+        VkDescriptorSetLayout descriptorSetLayout);
 
 private:
     DeletionQueue& _deletionQueue;

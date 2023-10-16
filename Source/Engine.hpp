@@ -23,7 +23,7 @@
 #include "Pipeline.hpp"
 #include "Mesh.hpp"
 #include "Renderable.hpp"
-#include "Frame.hpp"
+#include "FrameData.hpp"
 
 constexpr uint32_t FRAME_COUNT = 2;
 
@@ -91,6 +91,9 @@ private:
     VkRenderPass _renderPass;
     std::vector<VkFramebuffer> _framebuffers;
 
+    VkDescriptorSetLayout _globalDescriptorSetLayout;
+    VkDescriptorPool _descriptorPool;    
+
     VkShaderModule _simpleVertexShaderModule;
     VkShaderModule _simpleFragmentShaderModule;
 
@@ -98,8 +101,87 @@ private:
 
     VkPipeline _meshPipeline;
 
-    Frame _frames[FRAME_COUNT];
-    Frame& GetCurrentFrame();
+    FrameData _frameDates[FRAME_COUNT];
+    FrameData& GetCurrentFrameData();
+
+    template<typename TData>
+    std::expected<AllocatedBuffer, std::string> CreateBuffer(
+        const std::string& label,
+        VkBufferUsageFlagBits bufferUsageFlagBits,
+        VmaMemoryUsage memoryUsage)
+    {
+        VkBufferCreateInfo bufferCreateInfo = {};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = sizeof(TData);
+        bufferCreateInfo.usage = bufferUsageFlagBits;
+
+        VmaAllocationCreateInfo bufferAllocationCreateInfo = {};
+        bufferAllocationCreateInfo.usage = memoryUsage;
+
+        AllocatedBuffer buffer;
+        if (vmaCreateBuffer(
+            _allocator,
+            &bufferCreateInfo,
+            &bufferAllocationCreateInfo,
+            &buffer.buffer,
+            &buffer.allocation,
+            nullptr) != VK_SUCCESS)
+        {
+            return std::unexpected("Vulkan: Failed to create buffer");
+        }
+
+        SetDebugName(_device, buffer.buffer, label);
+
+        _deletionQueue.Push([=]()
+        {
+            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
+        });
+
+        return buffer;
+    }
+
+    template<typename TData>
+    std::expected<AllocatedBuffer, std::string> CreateBuffer(
+        const std::string& label,
+        VkBufferUsageFlagBits bufferUsageFlagBits,
+        VmaMemoryUsage memoryUsage,
+        TData data)
+    {
+        VkBufferCreateInfo bufferCreateInfo = {};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = sizeof(TData);
+        bufferCreateInfo.usage = bufferUsageFlagBits;
+
+        VmaAllocationCreateInfo bufferAllocationCreateInfo = {};
+        bufferAllocationCreateInfo.usage = memoryUsage;
+
+        AllocatedBuffer buffer;
+        if (vmaCreateBuffer(_allocator, &bufferCreateInfo, &bufferAllocationCreateInfo,
+            &buffer.buffer,
+            &buffer.allocation,
+            nullptr) != VK_SUCCESS)
+        {
+            return std::unexpected("Vulkan: Failed to create buffer");
+        }
+
+        SetDebugName(_device, buffer.buffer, label);
+
+        void* dataPtr = nullptr;
+        if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
+        {
+            return std::unexpected("Vulkan: Failed to map buffer");
+        }
+
+        memcpy(dataPtr, &data, sizeof(TData));
+        vmaUnmapMemory(_allocator, buffer.allocation);    
+
+        _deletionQueue.Push([=]()
+        {
+            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
+        });
+
+        return buffer;
+    }
 
     template<typename T>
     std::expected<AllocatedBuffer, std::string> CreateBuffer(
@@ -156,6 +238,7 @@ private:
     bool InitializeCommandBuffers();
     bool InitializeRenderPass();
     bool InitializeFramebuffers();
+    bool InitializeDescriptors();
     bool InitializeSynchronizationStructures();
 
     bool LoadMeshFromFile(const std::string& modelName, const std::string& filePath);

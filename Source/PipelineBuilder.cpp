@@ -150,15 +150,16 @@ PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOpe
 std::expected<Pipeline, std::string> PipelineBuilder::Build(
     const std::string& label,
     VkDevice device,
-    VkRenderPass renderPass)
+    VkRenderPass renderPass,
+    VkDescriptorSetLayout descriptorSetLayout)
 {
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
     pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutCreateInfo.pNext = nullptr;
 
     pipelineLayoutCreateInfo.flags = 0;
-    pipelineLayoutCreateInfo.setLayoutCount = 0;
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
 
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.offset = 0;
