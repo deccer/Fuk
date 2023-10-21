@@ -163,7 +163,7 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(
 
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(MeshPushConstants);
+    pushConstantRange.size = sizeof(GpuPushConstants);
     pushConstantRange.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
 
     pipelineLayoutCreateInfo.pushConstantRangeCount = 1;

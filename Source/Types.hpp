@@ -26,7 +26,7 @@ struct AllocatedImage
     VmaAllocation allocation = {};
 };
 
-struct MeshPushConstants
+struct GpuPushConstants
 {
     glm::mat4 worldMatrix;
 };
@@ -37,6 +37,21 @@ struct GpuCameraData
     glm::mat4 viewMatrix;
     glm::mat4 viewProjectionMatrix;
 };
+
+struct GpuSceneData
+{
+	glm::vec4 fogColorAndExponent;
+	glm::vec4 fogDistances;
+	glm::vec4 ambientColor;
+	glm::vec4 sunlightDirectionAndPower;
+	glm::vec4 sunlightColor;
+};
+
+template<class T>
+T* ToTempPtr(T&& t)
+{
+    return &t;
+}
 
 template <typename>
 struct VulkanObjectType;
