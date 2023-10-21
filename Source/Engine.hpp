@@ -119,8 +119,16 @@ private:
         AllocatedBuffer buffer;
         if (vmaCreateBuffer(
             _allocator,
-            ToTempPtr(VkBufferCreateInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = data.size() * sizeof(TData), .usage = VK_BUFFER_USAGE_2_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT}),
-            ToTempPtr(VmaAllocationCreateInfo{.usage = memoryUsage}),
+            ToTempPtr(VkBufferCreateInfo
+            {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = data.size() * sizeof(TData),
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+            }),
+            ToTempPtr(VmaAllocationCreateInfo
+            {
+                .usage = memoryUsage
+            }),
             &buffer.buffer,
             &buffer.allocation,
             nullptr) != VK_SUCCESS)
@@ -156,8 +164,16 @@ private:
         AllocatedBuffer buffer;
         if (vmaCreateBuffer(
             _allocator,
-            ToTempPtr(VkBufferCreateInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = dataSize, .usage = VK_BUFFER_USAGE_2_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT}),
-            ToTempPtr(VmaAllocationCreateInfo{.usage = memoryUsage}),
+            ToTempPtr(VkBufferCreateInfo
+            {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = dataSize,
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+            }),
+            ToTempPtr(VmaAllocationCreateInfo
+            {
+                .usage = memoryUsage
+            }),
             &buffer.buffer,
             &buffer.allocation,
             nullptr) != VK_SUCCESS)
@@ -183,8 +199,16 @@ private:
         AllocatedBuffer buffer;
         if (vmaCreateBuffer(
             _allocator,
-            ToTempPtr(VkBufferCreateInfo{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = sizeof(TData), .usage = VK_BUFFER_USAGE_2_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT}),
-            ToTempPtr(VmaAllocationCreateInfo{.usage = memoryUsage}),
+            ToTempPtr(VkBufferCreateInfo
+            {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = sizeof(TData),
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+            }),
+            ToTempPtr(VmaAllocationCreateInfo
+            {
+                .usage = memoryUsage
+            }),
             &buffer.buffer,
             &buffer.allocation,
             nullptr) != VK_SUCCESS)

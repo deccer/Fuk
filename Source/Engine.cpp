@@ -966,18 +966,30 @@ bool Engine::InitializeDescriptors()
         return false;
     }
 
-    VkDescriptorSetLayoutBinding cameraBufferBinding = {};
-    cameraBufferBinding.binding = 0;
-    cameraBufferBinding.descriptorCount = 1;
-    cameraBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    cameraBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    VkDescriptorSetLayoutBinding gpuCameraDataBufferBinding = {};
+    gpuCameraDataBufferBinding.binding = 0;
+    gpuCameraDataBufferBinding.descriptorCount = 1;
+    gpuCameraDataBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    gpuCameraDataBufferBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutBinding gpuSceneDataBufferBinding = {};
+    gpuSceneDataBufferBinding.binding = 1;
+    gpuSceneDataBufferBinding.descriptorCount = 1;
+    gpuSceneDataBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    gpuSceneDataBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] =
+    {
+        gpuCameraDataBufferBinding,
+        gpuSceneDataBufferBinding
+    };
 
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {};
     descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descriptorSetLayoutCreateInfo.pNext = nullptr;
-    descriptorSetLayoutCreateInfo.bindingCount = 1;
+    descriptorSetLayoutCreateInfo.bindingCount = 2;
     descriptorSetLayoutCreateInfo.flags = 0;
-    descriptorSetLayoutCreateInfo.pBindings = &cameraBufferBinding;
+    descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
 
     if (vkCreateDescriptorSetLayout(_device, &descriptorSetLayoutCreateInfo, nullptr, &_globalDescriptorSetLayout) != VK_SUCCESS)
     {
@@ -1035,24 +1047,44 @@ bool Engine::InitializeDescriptors()
             return false;
         }
 
-        VkDescriptorBufferInfo descriptorBufferInfo;
-        descriptorBufferInfo.buffer = _frameDates[i].cameraBuffer.buffer;
-        descriptorBufferInfo.offset = 0;
-        descriptorBufferInfo.range = sizeof(GpuCameraData);
+        VkDescriptorBufferInfo gpuCameraDataDescriptorBufferInfo = {};
+        gpuCameraDataDescriptorBufferInfo.buffer = _frameDates[i].cameraBuffer.buffer;
+        gpuCameraDataDescriptorBufferInfo.offset = 0;
+        gpuCameraDataDescriptorBufferInfo.range = sizeof(GpuCameraData);
 
-        VkWriteDescriptorSet writeDescriptorSet = {};
-        writeDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeDescriptorSet.pNext = nullptr;
-        writeDescriptorSet.dstBinding = 0;
-        writeDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
-        writeDescriptorSet.descriptorCount = 1;
-        writeDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writeDescriptorSet.pBufferInfo = &descriptorBufferInfo;
+        VkWriteDescriptorSet gpuCameraDataWriteDescriptorSet = {};
+        gpuCameraDataWriteDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        gpuCameraDataWriteDescriptorSet.pNext = nullptr;
+        gpuCameraDataWriteDescriptorSet.dstBinding = 0;
+        gpuCameraDataWriteDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
+        gpuCameraDataWriteDescriptorSet.descriptorCount = 1;
+        gpuCameraDataWriteDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        gpuCameraDataWriteDescriptorSet.pBufferInfo = &gpuCameraDataDescriptorBufferInfo;
+
+        VkDescriptorBufferInfo gpuSceneDataDescriptorBufferInfo = {};
+        gpuSceneDataDescriptorBufferInfo.buffer = _gpuSceneDataBuffer.buffer;
+        gpuSceneDataDescriptorBufferInfo.offset = PadUniformBufferSize(sizeof(GpuSceneData)) * i;
+        gpuSceneDataDescriptorBufferInfo.range = sizeof(GpuSceneData);
+
+        VkWriteDescriptorSet gpuSceneDataWriteDescriptorSet = {};
+        gpuSceneDataWriteDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        gpuSceneDataWriteDescriptorSet.pNext = nullptr;
+        gpuSceneDataWriteDescriptorSet.dstBinding = 1;
+        gpuSceneDataWriteDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
+        gpuSceneDataWriteDescriptorSet.descriptorCount = 1;
+        gpuSceneDataWriteDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        gpuSceneDataWriteDescriptorSet.pBufferInfo = &gpuSceneDataDescriptorBufferInfo;        
+
+        VkWriteDescriptorSet writeDescriptorSets[] =
+        {
+            gpuCameraDataWriteDescriptorSet,
+            gpuSceneDataWriteDescriptorSet
+        };
 
         vkUpdateDescriptorSets(
             _device,
-            1,
-            &writeDescriptorSet,
+            2,
+            writeDescriptorSets,
             0,
             nullptr);
     }
@@ -1183,6 +1215,20 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
     {
 	    memcpy(gpuCameraDataPtr, &gpuCameraData, sizeof(GpuCameraData));
 	    vmaUnmapMemory(_allocator, currentFrame.cameraBuffer.allocation);
+    }
+
+    float arbitraryValue = (_frameIndex / 120.f);
+
+	_gpuSceneData.ambientColor = {sin(arbitraryValue), 0, cos(arbitraryValue), 1};
+
+	void* gpuSceneDataPtr;
+	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation , (void**)&gpuSceneDataPtr) == VK_SUCCESS)
+    {
+	    int frameIndex = _frameIndex % FRAME_COUNT;
+    	gpuSceneDataPtr += PadUniformBufferSize(sizeof(GpuSceneData)) * frameIndex;
+
+	    memcpy(gpuSceneDataPtr, &_gpuSceneData, sizeof(GpuSceneData));
+	    vmaUnmapMemory(_allocator, _gpuSceneDataBuffer.allocation);    
     }
 
     Mesh* lastMesh = nullptr;
