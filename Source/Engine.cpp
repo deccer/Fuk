@@ -138,34 +138,31 @@ std::vector<uint32_t> ConvertIndexBufferFormat(
 std::expected<AllocatedImage, std::string> Engine::CreateImage(
     const std::string& label,
     VkFormat format,
-    VkImageUsageFlagBits imageUsageFlags,
-    VkImageAspectFlagBits imageAspectFlags,
+    VkImageUsageFlags imageUsageFlags,
+    VkImageAspectFlags imageAspectFlags,
     VkExtent3D extent)
 {
-    VkImageCreateInfo imageCreateInfo = {};
-    imageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageCreateInfo.pNext = nullptr;
-
-    imageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
-
-    imageCreateInfo.format = format;
-    imageCreateInfo.extent = extent;
-
-    imageCreateInfo.mipLevels = 1;
-    imageCreateInfo.arrayLayers = 1;
-    imageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageCreateInfo.usage = imageUsageFlags;
-
-    VmaAllocationCreateInfo allocationCreateInfo = {};
-    allocationCreateInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    allocationCreateInfo.requiredFlags = VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
     AllocatedImage image;
     if (vmaCreateImage(
         _allocator,
-        &imageCreateInfo,
-        &allocationCreateInfo,
+        ToTempPtr(VkImageCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .pNext = nullptr,
+            .imageType = VkImageType::VK_IMAGE_TYPE_2D,
+            .format = format,
+            .extent = extent,
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = VkSampleCountFlagBits::VK_SAMPLE_COUNT_1_BIT,
+            .tiling = VkImageTiling::VK_IMAGE_TILING_OPTIMAL,
+            .usage = imageUsageFlags
+        }),
+        ToTempPtr(VmaAllocationCreateInfo
+        {
+            .usage = VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY,
+            .requiredFlags = VkMemoryPropertyFlagBits::VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        }),
         &image.image,
         &image.allocation,
         nullptr) != VK_SUCCESS)
@@ -175,20 +172,26 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
 
     SetDebugName(_device, image.image, label);
 
-    VkImageViewCreateInfo imageViewCreateInfo = {};
-    imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    imageViewCreateInfo.pNext = nullptr;
-
-    imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    imageViewCreateInfo.image = image.image;
-    imageViewCreateInfo.format = format;
-    imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    imageViewCreateInfo.subresourceRange.levelCount = 1;
-    imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    imageViewCreateInfo.subresourceRange.layerCount = 1;
-    imageViewCreateInfo.subresourceRange.aspectMask = imageAspectFlags;
-
-    if (vkCreateImageView(_device, &imageViewCreateInfo, nullptr, &image.imageView) != VK_SUCCESS)
+    if (vkCreateImageView(
+        _device,
+        ToTempPtr(VkImageViewCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .pNext = nullptr,
+            .image = image.image,            
+            .viewType = VkImageViewType::VK_IMAGE_VIEW_TYPE_2D,
+            .format = format,
+            .subresourceRange = VkImageSubresourceRange
+            {
+                .aspectMask = imageAspectFlags,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            }
+        }),
+        nullptr,
+        &image.imageView) != VK_SUCCESS)
     {
         return std::unexpected("Vulkan: Failed to create image view");
     }
@@ -246,8 +249,8 @@ bool Engine::Initialize()
     if (appImagePixels != nullptr)
     {
         GLFWimage appImage{};
-        appImage.width = 256;
-        appImage.height = 256;
+        appImage.width = appImageWidth;
+        appImage.height = appImageHeight;
         appImage.pixels = appImagePixels;
         glfwSetWindowIcon(_window, 1, &appImage);
         stbi_image_free(appImagePixels);
@@ -341,7 +344,11 @@ bool Engine::Load()
         .minDepth = 0.0f,
         .maxDepth = 1.0f
     };
-    VkRect2D scissor = { .offset = { 0, 0 }, .extent = _windowExtent };
+    VkRect2D scissor =
+    {
+        .offset = { 0, 0 },
+        .extent = _windowExtent
+    };
 
     PipelineBuilder pipelineBuilder(_deletionQueue);
     auto pipelineResult = pipelineBuilder
@@ -462,9 +469,8 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
                 auto label = std::format("VertexBuffer_{}", node->name);
                 auto createBufferResult = CreateBuffer(
                     label,
-                    VkBufferUsageFlagBits::VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
                     VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
-                    mesh.vertices);
+                    std::span(mesh.vertices));
                 if (!createBufferResult.has_value())
                 {
                     std::cerr << createBufferResult.error() << "\n";
@@ -475,9 +481,8 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
 
                 createBufferResult = CreateBuffer(
                     "IndexBuffer",
-                    VkBufferUsageFlagBits::VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                     VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
-                    mesh.indices);
+                    std::span(mesh.indices));
                 if (!createBufferResult.has_value())
                 {
                     std::cerr << createBufferResult.error() << "\n";
@@ -702,6 +707,7 @@ bool Engine::InitializeVulkan()
 
     _device = vkbDevice.device;
     _physicalDevice = vkbDevice.physical_device;
+    _physicalDeviceProperties = vkbDevice.physical_device.properties;
 
     volkLoadDevice(_device);
 
@@ -710,16 +716,19 @@ bool Engine::InitializeVulkan()
 
     SetDebugName(_device, _graphicsQueue, "Graphics Queue");    
 
-    static VmaVulkanFunctions vmaVulkanFunctions = {};
-    vmaVulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
-    vmaVulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
-
-    VmaAllocatorCreateInfo allocatorInfo = {};
-    allocatorInfo.physicalDevice = _physicalDevice;
-    allocatorInfo.device = _device;
-    allocatorInfo.instance = _instance;
-    allocatorInfo.pVulkanFunctions = &vmaVulkanFunctions;
-    if (vmaCreateAllocator(&allocatorInfo, &_allocator) != VK_SUCCESS)
+    if (vmaCreateAllocator(
+        ToTempPtr(VmaAllocatorCreateInfo
+        {
+            .physicalDevice = _physicalDevice,
+            .device = _device,
+            .pVulkanFunctions = ToTempPtr(VmaVulkanFunctions
+            {
+                .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
+                .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
+            }),
+            .instance = _instance,
+        }),
+        &_allocator) != VK_SUCCESS)
     {
         std::cerr << "VirtualMemoryAllocator: Failed to create allocator\n";
         return false;
@@ -761,17 +770,17 @@ bool Engine::InitializeSwapchain()
 
 bool Engine::InitializeCommandBuffers()
 {
-    VkCommandPoolCreateInfo commandPoolCreateInfo = {};
-    commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commandPoolCreateInfo.pNext = nullptr;
-    commandPoolCreateInfo.queueFamilyIndex = _graphicsQueueFamily;
-    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
     for (size_t i = 0; i < FRAME_COUNT; i++)
     {
         if (vkCreateCommandPool(
             _device,
-            &commandPoolCreateInfo,
+            ToTempPtr(VkCommandPoolCreateInfo
+            {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = VkCommandPoolCreateFlagBits::VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = _graphicsQueueFamily,                
+            }),
             nullptr,
             &_frameDates[i].commandPool) != VK_SUCCESS)
         {
@@ -781,16 +790,16 @@ bool Engine::InitializeCommandBuffers()
 
         SetDebugName(_device, _frameDates[i].commandPool, std::format("CommandPool_{}\0", i));
 
-        VkCommandBufferAllocateInfo commandBufferAllocateInfo = {};
-        commandBufferAllocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        commandBufferAllocateInfo.pNext = nullptr;
-        commandBufferAllocateInfo.commandPool = _frameDates[i].commandPool;
-        commandBufferAllocateInfo.commandBufferCount = 1;
-        commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
         if(vkAllocateCommandBuffers(
             _device,
-            &commandBufferAllocateInfo,
+            ToTempPtr(VkCommandBufferAllocateInfo
+            {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+                .pNext = nullptr,
+                .commandPool = _frameDates[i].commandPool,
+                .level = VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+                .commandBufferCount = 1,
+            }),
             &_frameDates[i].commandBuffer) != VK_SUCCESS)
         {
             std::cout << "Vulkan: Failed to create command buffer\n";
@@ -819,7 +828,6 @@ bool Engine::InitializeRenderPass()
     colorAttachmentDescription.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachmentDescription.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachmentDescription.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-
     colorAttachmentDescription.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     colorAttachmentDescription.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
@@ -940,14 +948,19 @@ bool Engine::InitializeDescriptors()
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 }
     };
 
-    VkDescriptorPoolCreateInfo descriptorPoolCreateInfo = {};
-    descriptorPoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptorPoolCreateInfo.flags = 0;
-    descriptorPoolCreateInfo.maxSets = 16;
-    descriptorPoolCreateInfo.poolSizeCount = (uint32_t)descriptorPoolSizes.size();
-    descriptorPoolCreateInfo.pPoolSizes = descriptorPoolSizes.data();
-
-    if (vkCreateDescriptorPool(_device, &descriptorPoolCreateInfo, nullptr, &_descriptorPool) != VK_SUCCESS)
+    if (vkCreateDescriptorPool(
+        _device,
+        ToTempPtr(VkDescriptorPoolCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .maxSets = 16,
+            .poolSizeCount = (uint32_t)descriptorPoolSizes.size(),
+            .pPoolSizes = descriptorPoolSizes.data()
+        }),
+        nullptr,
+        &_descriptorPool) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to create descriptor pool\n";
         return false;
@@ -980,11 +993,24 @@ bool Engine::InitializeDescriptors()
         vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
     });
 
+    const size_t gpuSceneDataBufferSize = FRAME_COUNT * PadUniformBufferSize(sizeof(GpuSceneData));
+    auto gpuSceneDataBufferResult = CreateBuffer<GpuSceneData>(
+        "GpuSceneData",
+        gpuSceneDataBufferSize,
+        VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+    if (!gpuSceneDataBufferResult.has_value())
+    {
+        std::cerr << gpuSceneDataBufferResult.error() << "\n";
+        return false;
+    }
+
+    _gpuSceneDataBuffer = gpuSceneDataBufferResult.value();
+
     for (size_t i = 0; i < FRAME_COUNT; i++)
     {
+        std::string label = std::format("GpuCameraData_{}", i);
         auto createBufferResult = CreateBuffer<GpuCameraData>(
-            "GpuCameraData",
-            VkBufferUsageFlagBits::VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            label,
             VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
         if (!createBufferResult.has_value())
         {
@@ -994,13 +1020,16 @@ bool Engine::InitializeDescriptors()
         _frameDates[i].cameraBuffer = createBufferResult.value();
 
         VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {};
-        descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descriptorSetAllocateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         descriptorSetAllocateInfo.pNext = nullptr;
         descriptorSetAllocateInfo.descriptorPool = _descriptorPool;
         descriptorSetAllocateInfo.descriptorSetCount = 1;
         descriptorSetAllocateInfo.pSetLayouts = &_globalDescriptorSetLayout;
 
-        if (vkAllocateDescriptorSets(_device, &descriptorSetAllocateInfo, &_frameDates[i].globalDescriptorSet) != VK_SUCCESS)
+        if (vkAllocateDescriptorSets(
+            _device,
+            &descriptorSetAllocateInfo,
+            &_frameDates[i].globalDescriptorSet) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to allocate descriptor sets\n";
             return false;
@@ -1012,15 +1041,20 @@ bool Engine::InitializeDescriptors()
         descriptorBufferInfo.range = sizeof(GpuCameraData);
 
         VkWriteDescriptorSet writeDescriptorSet = {};
-        writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writeDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writeDescriptorSet.pNext = nullptr;
         writeDescriptorSet.dstBinding = 0;
         writeDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
         writeDescriptorSet.descriptorCount = 1;
-        writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writeDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writeDescriptorSet.pBufferInfo = &descriptorBufferInfo;
 
-        vkUpdateDescriptorSets(_device, 1, &writeDescriptorSet, 0, nullptr);
+        vkUpdateDescriptorSets(
+            _device,
+            1,
+            &writeDescriptorSet,
+            0,
+            nullptr);
     }
 
     return true;
@@ -1102,14 +1136,18 @@ std::expected<VkShaderModule, std::string> Engine::LoadShaderModule(const std::s
 {
     auto buffer = ReadFile<uint32_t>(filePath);
 
-    VkShaderModuleCreateInfo shaderModuleCreateInfo = {};
-    shaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    shaderModuleCreateInfo.pNext = nullptr;
-    shaderModuleCreateInfo.codeSize = buffer.size();
-    shaderModuleCreateInfo.pCode = buffer.data();
-
     VkShaderModule shaderModule;
-    if (vkCreateShaderModule(_device, &shaderModuleCreateInfo, nullptr, &shaderModule) != VK_SUCCESS)
+    if (vkCreateShaderModule(
+        _device,
+        ToTempPtr(VkShaderModuleCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .pNext = nullptr,
+            .codeSize = buffer.size(),
+            .pCode = buffer.data()
+        }),
+        nullptr,
+         &shaderModule) != VK_SUCCESS)
     {
         return std::unexpected("Vulkan: Failed to create shader module");
     }
@@ -1131,7 +1169,7 @@ GLFWwindow* Engine::GetWindow()
 
 void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count)
 {
-    MeshPushConstants pushConstants;
+    GpuPushConstants pushConstants;
 
 	GpuCameraData gpuCameraData;
 	gpuCameraData.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
@@ -1168,7 +1206,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         }
 
         pushConstants.worldMatrix = renderable.worldMatrix;
-        vkCmdPushConstants(commandBuffer, renderable.pipeline.pipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &pushConstants);
+        vkCmdPushConstants(commandBuffer, renderable.pipeline.pipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuPushConstants), &pushConstants);
 
         vkCmdDrawIndexed(commandBuffer, renderable.mesh->indices.size(), 1, 0, 0, 0);
     }
@@ -1208,4 +1246,15 @@ Mesh* Engine::GetMesh(const std::string& name)
 FrameData& Engine::GetCurrentFrameData()
 {
     return _frameDates[_frameIndex % FRAME_COUNT];
+}
+
+size_t Engine::PadUniformBufferSize(size_t originalSize)
+{
+    size_t minUboAlignment = _physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
+    size_t alignedSize = originalSize;
+    if (minUboAlignment > 0)
+    {
+        alignedSize = (alignedSize + minUboAlignment - 1) & ~(minUboAlignment - 1);
+    }
+    return alignedSize;
 }
