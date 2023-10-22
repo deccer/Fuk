@@ -24,8 +24,9 @@
 #include "Mesh.hpp"
 #include "Renderable.hpp"
 #include "FrameData.hpp"
+#include "UploadContext.hpp"
 
-constexpr uint32_t FRAME_COUNT = 2;
+constexpr uint32_t FRAMES_IN_FLIGHT = 2;
 
 template<typename T>
 void SetDebugName(VkDevice device, T object, const std::string& debugName)
@@ -106,8 +107,11 @@ private:
     GpuSceneData _gpuSceneData;
     AllocatedBuffer _gpuSceneDataBuffer;
 
-    FrameData _frameDates[FRAME_COUNT];
+    FrameData _frameDates[FRAMES_IN_FLIGHT];
     FrameData& GetCurrentFrameData();
+
+    UploadContext _uploadContext;
+    void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
 
     size_t PadUniformBufferSize(size_t originalSize);
 
@@ -148,7 +152,7 @@ private:
         memcpy(dataPtr, data.data(), data.size() * sizeof(TData));
         vmaUnmapMemory(_allocator, buffer.allocation);    
 
-        _deletionQueue.Push([=]()
+        _deletionQueue.Push([=, this]()
         {
             vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
         });
@@ -184,7 +188,7 @@ private:
 
         SetDebugName(_device, buffer.buffer, label);
 
-        _deletionQueue.Push([=]()
+        _deletionQueue.Push([=, this]()
         {
             vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
         });
@@ -219,7 +223,7 @@ private:
 
         SetDebugName(_device, buffer.buffer, label);
 
-        _deletionQueue.Push([=]()
+        _deletionQueue.Push([=, this]()
         {
             vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
         });

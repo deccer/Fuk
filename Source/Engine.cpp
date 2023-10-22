@@ -199,7 +199,7 @@ std::expected<AllocatedImage, std::string> Engine::CreateImage(
     auto viewLabel = std::format("{}_ImageView", label);
     SetDebugName(_device, image.imageView, viewLabel);
 
-    _deletionQueue.Push([=]()
+    _deletionQueue.Push([=, this]()
     {
         vkDestroyImageView(_device, image.imageView, nullptr);
         vmaDestroyImage(_allocator, image.image, image.allocation);
@@ -770,7 +770,7 @@ bool Engine::InitializeSwapchain()
 
     SetDebugName(_device, _swapchain, "SwapChain");
 
-    _deletionQueue.Push([=]()
+    _deletionQueue.Push([=, this]()
     {
         vkDestroySwapchainKHR(_device, _swapchain, nullptr);
     });
@@ -780,7 +780,7 @@ bool Engine::InitializeSwapchain()
 
 bool Engine::InitializeCommandBuffers()
 {
-    for (size_t i = 0; i < FRAME_COUNT; i++)
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++)
     {
         if (vkCreateCommandPool(
             _device,
@@ -818,7 +818,7 @@ bool Engine::InitializeCommandBuffers()
 
         SetDebugName(_device, _frameDates[i].commandBuffer, std::format("CommandBuffer_{}", i));
 
-        _deletionQueue.Push([=]()
+        _deletionQueue.Push([=, this]()
         {
             vkDestroyCommandPool(_device, _frameDates[i].commandPool, nullptr);
         });
@@ -908,7 +908,7 @@ bool Engine::InitializeRenderPass()
 
     SetDebugName(_device, _renderPass, "RenderPass");
 
-    _deletionQueue.Push([=]()
+    _deletionQueue.Push([=, this]()
     {
         vkDestroyRenderPass(_device, _renderPass, nullptr);
     });
@@ -1047,7 +1047,7 @@ bool Engine::InitializeDescriptors()
         vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
     });
 
-    const size_t gpuSceneDataBufferSize = FRAME_COUNT * PadUniformBufferSize(sizeof(GpuSceneData));
+    const size_t gpuSceneDataBufferSize = FRAMES_IN_FLIGHT * PadUniformBufferSize(sizeof(GpuSceneData));
     auto gpuSceneDataBufferResult = CreateBuffer<GpuSceneData>(
         "GpuSceneData",
         gpuSceneDataBufferSize,
@@ -1060,7 +1060,7 @@ bool Engine::InitializeDescriptors()
 
     _gpuSceneDataBuffer = gpuSceneDataBufferResult.value();
 
-    for (size_t i = 0; i < FRAME_COUNT; i++)
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++)
     {
         std::string label = std::format("GpuCameraData_{}", i);
         auto createBufferResult = CreateBuffer<GpuCameraData>(
@@ -1183,42 +1183,72 @@ bool Engine::InitializeDescriptors()
 bool Engine::InitializeSynchronizationStructures()
 {
     VkFenceCreateInfo fenceCreateInfo = {};
-    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceCreateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceCreateInfo.pNext = nullptr;
     fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     VkSemaphoreCreateInfo semaphoreCreateInfo = {};
-    semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphoreCreateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     semaphoreCreateInfo.pNext = nullptr;
     semaphoreCreateInfo.flags = 0;
 
-    for (size_t i = 0; i < FRAME_COUNT; i++)
+    for (size_t i = 0; i < FRAMES_IN_FLIGHT; i++)
     {
-        if (vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frameDates[i].renderFence) != VK_SUCCESS)
+        if (vkCreateFence(
+            _device,
+            &fenceCreateInfo,
+            nullptr,
+            &_frameDates[i].renderFence) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create render fence\n";
             return false;
         }
 
-        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frameDates[i].presentSemaphore) != VK_SUCCESS)
+        if (vkCreateSemaphore(
+            _device,
+            &semaphoreCreateInfo,
+            nullptr,
+            &_frameDates[i].presentSemaphore) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create present semaphore\n";
             return false;
         }
 
-        if (vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frameDates[i].renderSemaphore) != VK_SUCCESS)
+        if (vkCreateSemaphore(
+            _device,
+            &semaphoreCreateInfo,
+            nullptr,
+            &_frameDates[i].renderSemaphore) != VK_SUCCESS)
         {
             std::cerr << "Vulkan: Failed to create render semaphore\n";
             return false;
         }
 
-        _deletionQueue.Push([=]()
+        _deletionQueue.Push([=, this]()
         {
             vkDestroyFence(_device, _frameDates[i].renderFence, nullptr);
             vkDestroySemaphore(_device, _frameDates[i].presentSemaphore, nullptr);
             vkDestroySemaphore(_device, _frameDates[i].renderSemaphore, nullptr);
         });
     }
+
+    if (vkCreateFence(
+        _device,
+        ToTempPtr(VkFenceCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .pNext = nullptr,
+        }),
+        nullptr,
+        &_uploadContext.uploadFence) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    _deletionQueue.Push([=, this]()
+    {
+        vkDestroyFence(_device, _uploadContext.uploadFence, nullptr);
+    });
 
     return true;
 }
@@ -1274,7 +1304,7 @@ std::expected<VkShaderModule, std::string> Engine::LoadShaderModule(const std::s
 
     SetDebugName(_device, shaderModule, filePath);
 
-    _deletionQueue.Push([=]()
+    _deletionQueue.Push([=, this]()
     {
         vkDestroyShaderModule(_device, shaderModule, nullptr);
     });
@@ -1322,7 +1352,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
     if (vmaMapMemory(_allocator, currentFrame.objectBuffer.allocation, &objectDataPtr) == VK_SUCCESS)
     {
         GpuObjectData* gpuObjectDates = (GpuObjectData*)objectDataPtr;
-        for (int i = 0; i < count; i++)
+        for (size_t i = 0; i < count; i++)
         {
 	        auto& renderable = first[i];
 	        gpuObjectDates[i].worldMatrix = renderable.worldMatrix;
@@ -1395,7 +1425,7 @@ Mesh* Engine::GetMesh(const std::string& name)
 
 FrameData& Engine::GetCurrentFrameData()
 {
-    return _frameDates[_frameIndex % FRAME_COUNT];
+    return _frameDates[_frameIndex % FRAMES_IN_FLIGHT];
 }
 
 size_t Engine::PadUniformBufferSize(size_t originalSize)
