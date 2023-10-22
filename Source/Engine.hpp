@@ -93,6 +93,7 @@ private:
     std::vector<VkFramebuffer> _framebuffers;
 
     VkDescriptorSetLayout _globalDescriptorSetLayout;
+    VkDescriptorSetLayout _objectDescriptorSetLayout;
     VkDescriptorPool _descriptorPool;    
 
     VkShaderModule _simpleVertexShaderModule;

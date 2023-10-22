@@ -360,7 +360,9 @@ bool Engine::Load()
         .WithDepthTestingEnabled(VkCompareOp::VK_COMPARE_OP_LESS)
         .WithoutBlending()
         .WithoutMultisampling()
-        .Build("OpaquePipeline", _device, _renderPass, _globalDescriptorSetLayout);
+        .WithDescriptorSetLayout(_globalDescriptorSetLayout)
+        .WithDescriptorSetLayout(_objectDescriptorSetLayout)
+        .Build("OpaquePipeline", _device, _renderPass);
     if (!pipelineResult.has_value())
     {
         std::cout << pipelineResult.error();
@@ -696,7 +698,15 @@ bool Engine::InitializeVulkan()
     }
 
     vkb::DeviceBuilder deviceBuilder{ physicalDeviceSelectionResult.value() };
-    auto deviceBuilderResult = deviceBuilder.build();
+
+    VkPhysicalDeviceShaderDrawParametersFeatures shaderDrawParametersFeatures = {};
+    shaderDrawParametersFeatures.sType = VkStructureType::VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+    shaderDrawParametersFeatures.pNext = nullptr;
+    shaderDrawParametersFeatures.shaderDrawParameters = VK_TRUE;
+
+    auto deviceBuilderResult = deviceBuilder
+        .add_pNext(&shaderDrawParametersFeatures)
+        .build();
     if (!deviceBuilderResult)
     {
         std::cerr << "Vulkan: Failed to create vulkan device.\nDetails: " << deviceBuilderResult.error().message() << "\n";
@@ -945,7 +955,9 @@ bool Engine::InitializeDescriptors()
 {
     std::vector<VkDescriptorPoolSize> descriptorPoolSizes =
     {
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 }
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 16 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16 }
     };
 
     if (vkCreateDescriptorPool(
@@ -975,23 +987,27 @@ bool Engine::InitializeDescriptors()
     VkDescriptorSetLayoutBinding gpuSceneDataBufferBinding = {};
     gpuSceneDataBufferBinding.binding = 1;
     gpuSceneDataBufferBinding.descriptorCount = 1;
-    gpuSceneDataBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    gpuSceneDataBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     gpuSceneDataBufferBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] =
+    VkDescriptorSetLayoutBinding globalDescriptorSetLayoutBindings[] =
     {
         gpuCameraDataBufferBinding,
         gpuSceneDataBufferBinding
     };
 
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo = {};
-    descriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutCreateInfo.pNext = nullptr;
-    descriptorSetLayoutCreateInfo.bindingCount = 2;
-    descriptorSetLayoutCreateInfo.flags = 0;
-    descriptorSetLayoutCreateInfo.pBindings = descriptorSetLayoutBindings;
+    VkDescriptorSetLayoutCreateInfo globalDescriptorSetLayoutCreateInfo = {};
+    globalDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    globalDescriptorSetLayoutCreateInfo.pNext = nullptr;
+    globalDescriptorSetLayoutCreateInfo.bindingCount = 2;
+    globalDescriptorSetLayoutCreateInfo.flags = 0;
+    globalDescriptorSetLayoutCreateInfo.pBindings = globalDescriptorSetLayoutBindings;
 
-    if (vkCreateDescriptorSetLayout(_device, &descriptorSetLayoutCreateInfo, nullptr, &_globalDescriptorSetLayout) != VK_SUCCESS)
+    if (vkCreateDescriptorSetLayout(
+        _device,
+        &globalDescriptorSetLayoutCreateInfo,
+        nullptr,
+        &_globalDescriptorSetLayout) != VK_SUCCESS)
     {
         std::cerr << "Vulkan: Failed to create descriptor set layout\n";
         return false;
@@ -999,9 +1015,35 @@ bool Engine::InitializeDescriptors()
 
     SetDebugName(_device, _globalDescriptorSetLayout, "GlobalDescriptorSetLayout");
 
+    VkDescriptorSetLayoutBinding objectDescriptorSetLayoutBinding = {};
+    objectDescriptorSetLayoutBinding.binding = 0;
+    objectDescriptorSetLayoutBinding.descriptorCount = 1;
+    objectDescriptorSetLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    objectDescriptorSetLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    VkDescriptorSetLayoutCreateInfo objectDescriptorSetLayoutCreateInfo = {};
+    objectDescriptorSetLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    objectDescriptorSetLayoutCreateInfo.pNext = nullptr;
+    objectDescriptorSetLayoutCreateInfo.bindingCount = 1;
+    objectDescriptorSetLayoutCreateInfo.flags = 0;
+    objectDescriptorSetLayoutCreateInfo.pBindings = &objectDescriptorSetLayoutBinding;
+
+    if (vkCreateDescriptorSetLayout(
+        _device,
+        &objectDescriptorSetLayoutCreateInfo,
+        nullptr,
+        &_objectDescriptorSetLayout) != VK_SUCCESS)
+    {
+        std::cerr << "Vulkan: Failed to create descriptor set layout\n";
+        return false;
+    }
+
+    SetDebugName(_device, _objectDescriptorSetLayout, "ObjectDescriptorSetLayout");    
+
     _deletionQueue.Push([&]()
     {
         vkDestroyDescriptorSetLayout(_device, _globalDescriptorSetLayout, nullptr);
+        vkDestroyDescriptorSetLayout(_device, _objectDescriptorSetLayout, nullptr);
         vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
     });
 
@@ -1031,21 +1073,52 @@ bool Engine::InitializeDescriptors()
 
         _frameDates[i].cameraBuffer = createBufferResult.value();
 
-        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo = {};
-        descriptorSetAllocateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        descriptorSetAllocateInfo.pNext = nullptr;
-        descriptorSetAllocateInfo.descriptorPool = _descriptorPool;
-        descriptorSetAllocateInfo.descriptorSetCount = 1;
-        descriptorSetAllocateInfo.pSetLayouts = &_globalDescriptorSetLayout;
+        label = std::format("GpuObjectData_{}", i);
+        createBufferResult = CreateBuffer<GpuObjectData>(
+            label,
+            VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
+        if (!createBufferResult.has_value())
+        {
+            return false;
+        }
+
+        _frameDates[i].objectBuffer = createBufferResult.value();
 
         if (vkAllocateDescriptorSets(
             _device,
-            &descriptorSetAllocateInfo,
+            ToTempPtr(VkDescriptorSetAllocateInfo
+            {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .pNext = nullptr,
+                .descriptorPool = _descriptorPool,
+                .descriptorSetCount = 1,
+                .pSetLayouts = &_globalDescriptorSetLayout
+            }),
             &_frameDates[i].globalDescriptorSet) != VK_SUCCESS)
         {
-            std::cerr << "Vulkan: Failed to allocate descriptor sets\n";
+            std::cerr << "Vulkan: Failed to allocate global descriptor set\n";
             return false;
         }
+
+        SetDebugName(_device, _frameDates[i].globalDescriptorSet, "GlobalDescriptorSet");
+
+        if (vkAllocateDescriptorSets(
+            _device,
+            ToTempPtr(VkDescriptorSetAllocateInfo
+            {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                .pNext = nullptr,
+                .descriptorPool = _descriptorPool,
+                .descriptorSetCount = 1,
+                .pSetLayouts = &_objectDescriptorSetLayout
+            }),
+            &_frameDates[i].objectDescriptorSet) != VK_SUCCESS)
+        {
+            std::cerr << "Vulkan: Failed to allocate object descriptor set\n";
+            return false;
+        }
+
+        SetDebugName(_device, _frameDates[i].objectDescriptorSet, "ObjectDescriptorSet");
 
         VkDescriptorBufferInfo gpuCameraDataDescriptorBufferInfo = {};
         gpuCameraDataDescriptorBufferInfo.buffer = _frameDates[i].cameraBuffer.buffer;
@@ -1063,7 +1136,7 @@ bool Engine::InitializeDescriptors()
 
         VkDescriptorBufferInfo gpuSceneDataDescriptorBufferInfo = {};
         gpuSceneDataDescriptorBufferInfo.buffer = _gpuSceneDataBuffer.buffer;
-        gpuSceneDataDescriptorBufferInfo.offset = PadUniformBufferSize(sizeof(GpuSceneData)) * i;
+        gpuSceneDataDescriptorBufferInfo.offset = 0;
         gpuSceneDataDescriptorBufferInfo.range = sizeof(GpuSceneData);
 
         VkWriteDescriptorSet gpuSceneDataWriteDescriptorSet = {};
@@ -1072,18 +1145,33 @@ bool Engine::InitializeDescriptors()
         gpuSceneDataWriteDescriptorSet.dstBinding = 1;
         gpuSceneDataWriteDescriptorSet.dstSet = _frameDates[i].globalDescriptorSet;
         gpuSceneDataWriteDescriptorSet.descriptorCount = 1;
-        gpuSceneDataWriteDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        gpuSceneDataWriteDescriptorSet.pBufferInfo = &gpuSceneDataDescriptorBufferInfo;        
+        gpuSceneDataWriteDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        gpuSceneDataWriteDescriptorSet.pBufferInfo = &gpuSceneDataDescriptorBufferInfo;
+
+        VkDescriptorBufferInfo gpuObjectDataDescriptorBufferInfo = {};
+        gpuObjectDataDescriptorBufferInfo.buffer = _frameDates[i].objectBuffer.buffer;
+        gpuObjectDataDescriptorBufferInfo.offset = 0;
+        gpuObjectDataDescriptorBufferInfo.range = sizeof(GpuObjectData);
+
+        VkWriteDescriptorSet gpuObjectDataWriteDescriptorSet = {};
+        gpuObjectDataWriteDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        gpuObjectDataWriteDescriptorSet.pNext = nullptr;
+        gpuObjectDataWriteDescriptorSet.dstBinding = 0;
+        gpuObjectDataWriteDescriptorSet.dstSet = _frameDates[i].objectDescriptorSet;
+        gpuObjectDataWriteDescriptorSet.descriptorCount = 1;
+        gpuObjectDataWriteDescriptorSet.descriptorType = VkDescriptorType::VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        gpuObjectDataWriteDescriptorSet.pBufferInfo = &gpuObjectDataDescriptorBufferInfo;
 
         VkWriteDescriptorSet writeDescriptorSets[] =
         {
             gpuCameraDataWriteDescriptorSet,
-            gpuSceneDataWriteDescriptorSet
+            gpuSceneDataWriteDescriptorSet,
+            gpuObjectDataWriteDescriptorSet
         };
 
         vkUpdateDescriptorSets(
             _device,
-            2,
+            3,
             writeDescriptorSets,
             0,
             nullptr);
@@ -1203,23 +1291,22 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
 {
     GpuPushConstants pushConstants;
 
-	GpuCameraData gpuCameraData;
-	gpuCameraData.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
-	gpuCameraData.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
-	gpuCameraData.viewProjectionMatrix = gpuCameraData.projectionMatrix * gpuCameraData.viewMatrix;
+    GpuCameraData gpuCameraData;
+    gpuCameraData.projectionMatrix = glm::perspectiveFov(glm::pi<float>() / 2.0f, (float)_windowExtent.width, (float)_windowExtent.height, 0.1f, 512.0f);
+    gpuCameraData.viewMatrix = glm::lookAtRH(glm::vec3(8, 7, 9), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
+    gpuCameraData.viewProjectionMatrix = gpuCameraData.projectionMatrix * gpuCameraData.viewMatrix;
 
     auto& currentFrame = GetCurrentFrameData();
 
-	void* gpuCameraDataPtr = nullptr;
-	if (vmaMapMemory(_allocator, currentFrame.cameraBuffer.allocation, &gpuCameraDataPtr) == VK_SUCCESS)
+    void* gpuCameraDataPtr = nullptr;
+    if (vmaMapMemory(_allocator, currentFrame.cameraBuffer.allocation, &gpuCameraDataPtr) == VK_SUCCESS)
     {
-	    memcpy(gpuCameraDataPtr, &gpuCameraData, sizeof(GpuCameraData));
-	    vmaUnmapMemory(_allocator, currentFrame.cameraBuffer.allocation);
+        memcpy(gpuCameraDataPtr, &gpuCameraData, sizeof(GpuCameraData));
+        vmaUnmapMemory(_allocator, currentFrame.cameraBuffer.allocation);
     }
 
     float arbitraryValue = (_frameIndex / 120.f);
-
-	_gpuSceneData.ambientColor = {sin(arbitraryValue), 0, cos(arbitraryValue), 1};
+    _gpuSceneData.ambientColor = {sin(arbitraryValue), 0, cos(arbitraryValue), 1};
 
 	char* gpuSceneDataPtr = {};
 	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation, (void**)&gpuSceneDataPtr) == VK_SUCCESS)
@@ -1227,8 +1314,20 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
 	    uint32_t frameIndex = _frameIndex % FRAME_COUNT;
     	gpuSceneDataPtr += PadUniformBufferSize(sizeof(GpuSceneData)) * frameIndex;
 
-	    memcpy(gpuSceneDataPtr, &_gpuSceneData, sizeof(GpuSceneData));
-	    vmaUnmapMemory(_allocator, _gpuSceneDataBuffer.allocation);    
+        memcpy(gpuSceneDataPtr, &_gpuSceneData, sizeof(GpuSceneData));
+        vmaUnmapMemory(_allocator, _gpuSceneDataBuffer.allocation);    
+    }
+
+    void* objectDataPtr = nullptr;
+    if (vmaMapMemory(_allocator, currentFrame.objectBuffer.allocation, &objectDataPtr) == VK_SUCCESS)
+    {
+        GpuObjectData* gpuObjectDates = (GpuObjectData*)objectDataPtr;
+        for (int i = 0; i < count; i++)
+        {
+	        auto& renderable = first[i];
+	        gpuObjectDates[i].worldMatrix = renderable.worldMatrix;
+        }
+        vmaUnmapMemory(_allocator, currentFrame.objectBuffer.allocation);
     }
 
     Mesh* lastMesh = nullptr;
@@ -1241,7 +1340,9 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
             vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipeline);
             lastPipeline = &renderable.pipeline;
 
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 0, 1, &currentFrame.globalDescriptorSet, 0, nullptr);
+            uint32_t dynamicOffset = PadUniformBufferSize(sizeof(GpuSceneData)) * i;
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 0, 1, &currentFrame.globalDescriptorSet, 1, &dynamicOffset);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 1, 1, &currentFrame.objectDescriptorSet, 0, nullptr);
         }
 
         if (renderable.mesh != lastMesh)
@@ -1249,6 +1350,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
             VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, &renderable.mesh->vertexBuffer.buffer, &offset);
             vkCmdBindIndexBuffer(commandBuffer, renderable.mesh->indexBuffer.buffer, offset, VkIndexType::VK_INDEX_TYPE_UINT32);
+            lastMesh = renderable.mesh;
         }
 
         pushConstants.worldMatrix = renderable.worldMatrix;
@@ -1256,6 +1358,8 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
 
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(renderable.mesh->indices.size()), 1, 0, 0, 0);
     }
+
+    vkCmdDrawIndexed(commandBuffer, lastMesh->indices.size(), count, 0, 0, 0);
 }
 
 std::vector<Mesh*> Engine::GetModel(const std::string& name)

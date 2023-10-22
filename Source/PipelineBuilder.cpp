@@ -147,30 +147,41 @@ PipelineBuilder& PipelineBuilder::WithDepthTestingEnabled(VkCompareOp compareOpe
     return *this;
 }
 
+PipelineBuilder& PipelineBuilder::WithDescriptorSetLayout(VkDescriptorSetLayout descriptorSetLayout)
+{
+    _descriptorSetLayouts.push_back(descriptorSetLayout);
+    return *this;
+}
+
 std::expected<Pipeline, std::string> PipelineBuilder::Build(
     const std::string& label,
     VkDevice device,
-    VkRenderPass renderPass,
-    VkDescriptorSetLayout descriptorSetLayout)
+    VkRenderPass renderPass)
 {
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
-    pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutCreateInfo.pNext = nullptr;
-
-    pipelineLayoutCreateInfo.flags = 0;
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+    if (_descriptorSetLayouts.empty())
+    {
+        return std::unexpected("Pipeline has no descriptor set layouts");
+    }
 
     VkPushConstantRange pushConstantRange = {};
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(GpuPushConstants);
     pushConstantRange.stageFlags = VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT;
 
-    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
-    pipelineLayoutCreateInfo.pPushConstantRanges = &pushConstantRange;
-
     Pipeline pipeline;
-    if (vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &pipeline.pipelineLayout) != VK_SUCCESS)
+    if (vkCreatePipelineLayout(
+        device,
+        ToTempPtr(VkPipelineLayoutCreateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .setLayoutCount = static_cast<uint32_t>(_descriptorSetLayouts.size()),
+            .pSetLayouts = _descriptorSetLayouts.data(),
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange,
+        }),
+        nullptr,
+        &pipeline.pipelineLayout) != VK_SUCCESS)
     {
         return std::unexpected("Vulkan: Failed to create pipeline layout");
     }
@@ -184,7 +195,7 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(
     });
 
     VkPipelineViewportStateCreateInfo pipelineViewportStateCreateInfo = {};
-    pipelineViewportStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    pipelineViewportStateCreateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     pipelineViewportStateCreateInfo.pNext = nullptr;
     pipelineViewportStateCreateInfo.viewportCount = 1;
     pipelineViewportStateCreateInfo.pViewports = &_viewport;
@@ -192,7 +203,7 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(
     pipelineViewportStateCreateInfo.pScissors = &_scissor;
 
     VkPipelineColorBlendStateCreateInfo pipelineColorBlendStateCreateInfo = {};
-    pipelineColorBlendStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    pipelineColorBlendStateCreateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     pipelineColorBlendStateCreateInfo.pNext = nullptr;
     pipelineColorBlendStateCreateInfo.logicOpEnable = VK_FALSE;
     pipelineColorBlendStateCreateInfo.logicOp = VK_LOGIC_OP_COPY;
@@ -200,7 +211,7 @@ std::expected<Pipeline, std::string> PipelineBuilder::Build(
     pipelineColorBlendStateCreateInfo.pAttachments = &_colorBlendAttachment;
 
     VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
-    pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipelineCreateInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     pipelineCreateInfo.pNext = nullptr;
     pipelineCreateInfo.stageCount = static_cast<uint32_t>(_shaderStages.size());
     pipelineCreateInfo.pStages = _shaderStages.data();

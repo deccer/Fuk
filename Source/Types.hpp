@@ -47,6 +47,11 @@ struct GpuSceneData
 	glm::vec4 sunlightColor;
 };
 
+struct GpuObjectData
+{
+    glm::mat4 worldMatrix;
+};
+
 template<class T>
 T* ToTempPtr(T&& t)
 {

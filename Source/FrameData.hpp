@@ -15,4 +15,7 @@ struct FrameData
 
     AllocatedBuffer cameraBuffer = {};
     VkDescriptorSet globalDescriptorSet;
+
+    AllocatedBuffer objectBuffer = {};
+    VkDescriptorSet objectDescriptorSet;
 };

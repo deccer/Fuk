@@ -25,12 +25,12 @@ public:
     PipelineBuilder& WithoutMultisampling();
     PipelineBuilder& WithoutBlending();
     PipelineBuilder& WithDepthTestingEnabled(VkCompareOp compareOperation = VkCompareOp::VK_COMPARE_OP_LESS);
+    PipelineBuilder& WithDescriptorSetLayout(VkDescriptorSetLayout descriptorSetLayout);
 
     std::expected<Pipeline, std::string> Build(
         const std::string& label,
         VkDevice device,
-        VkRenderPass renderPass,
-        VkDescriptorSetLayout descriptorSetLayout);
+        VkRenderPass renderPass);
 
 private:
     DeletionQueue& _deletionQueue;
@@ -44,4 +44,5 @@ private:
     VkPipelineDepthStencilStateCreateInfo _depthStencil;
     VkPipelineColorBlendAttachmentState _colorBlendAttachment;
     VkPipelineMultisampleStateCreateInfo _multisampling;
+    std::vector<VkDescriptorSetLayout> _descriptorSetLayouts;
 };
