@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string_view>
 #include <vector>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -34,4 +35,5 @@ struct Mesh
     AllocatedBuffer indexBuffer;
 
     glm::mat4 worldMatrix;
+    std::string_view name;
 };

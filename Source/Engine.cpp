@@ -12,6 +12,7 @@
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 VkSurfaceKHR CreateSurface(
     VkInstance instance,
@@ -467,6 +468,7 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
                 mesh.vertices = ConvertVertexBufferFormat(asset, primitive);
                 mesh.indices = ConvertIndexBufferFormat(asset, primitive);
                 mesh.worldMatrix = globalTransform;
+                mesh.name = fgMesh.name;
                 
                 auto label = std::format("VertexBuffer_{}", node->name);
                 auto createBufferResult = CreateBuffer(
@@ -888,7 +890,11 @@ bool Engine::InitializeRenderPass()
     depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    VkSubpassDependency subpassDependencies[2] = { colorDependency, depthDependency };
+    VkSubpassDependency subpassDependencies[] =
+    { 
+        colorDependency,
+        depthDependency
+    };
 
     VkRenderPassCreateInfo renderPassCreateInfo = {};
     renderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -896,9 +902,8 @@ bool Engine::InitializeRenderPass()
     renderPassCreateInfo.pAttachments = &attachments[0];
     renderPassCreateInfo.subpassCount = 1;
     renderPassCreateInfo.pSubpasses = &subpassDescription;
-
     renderPassCreateInfo.dependencyCount = 2;
-    renderPassCreateInfo.pDependencies = &subpassDependencies[0];
+    renderPassCreateInfo.pDependencies = subpassDependencies;
 
     if (vkCreateRenderPass(_device, &renderPassCreateInfo, nullptr, &_renderPass) != VK_SUCCESS)
     {
@@ -1073,9 +1078,11 @@ bool Engine::InitializeDescriptors()
 
         _frameDates[i].cameraBuffer = createBufferResult.value();
 
+        size_t dataSize = 100 * sizeof(GpuObjectData);
         label = std::format("GpuObjectData_{}", i);
         createBufferResult = CreateBuffer<GpuObjectData>(
             label,
+            dataSize,
             VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU);
         if (!createBufferResult.has_value())
         {
@@ -1151,7 +1158,7 @@ bool Engine::InitializeDescriptors()
         VkDescriptorBufferInfo gpuObjectDataDescriptorBufferInfo = {};
         gpuObjectDataDescriptorBufferInfo.buffer = _frameDates[i].objectBuffer.buffer;
         gpuObjectDataDescriptorBufferInfo.offset = 0;
-        gpuObjectDataDescriptorBufferInfo.range = sizeof(GpuObjectData);
+        gpuObjectDataDescriptorBufferInfo.range = 100 * sizeof(GpuObjectData);
 
         VkWriteDescriptorSet gpuObjectDataWriteDescriptorSet = {};
         gpuObjectDataWriteDescriptorSet.sType = VkStructureType::VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1336,7 +1343,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
     }
 
     float arbitraryValue = (_frameIndex / 120.f);
-    _gpuSceneData.ambientColor = {sin(arbitraryValue), 0, cos(arbitraryValue), 1};
+    _gpuSceneData.ambientColor = { sin(arbitraryValue), 0, cos(arbitraryValue), 1 };
 
 	char* gpuSceneDataPtr = {};
 	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation, (void**)&gpuSceneDataPtr) == VK_SUCCESS)
@@ -1355,6 +1362,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         for (size_t i = 0; i < count; i++)
         {
 	        auto& renderable = first[i];
+            //std::cout << "\nMesh: " << renderable.mesh->name << "\n" << glm::to_string(renderable.worldMatrix) << "\n";
 	        gpuObjectDates[i].worldMatrix = renderable.worldMatrix;
         }
         vmaUnmapMemory(_allocator, currentFrame.objectBuffer.allocation);
@@ -1365,14 +1373,15 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
     for (size_t i = 0; i < count; i++)
     {
         auto& renderable = first[i];
-        if (lastPipeline == nullptr || renderable.pipeline.pipeline != lastPipeline->pipeline)
+
+        if (lastPipeline == nullptr || lastPipeline->pipeline != renderable.pipeline.pipeline)
         {
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipeline);
+            vkCmdBindPipeline(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipeline);
             lastPipeline = &renderable.pipeline;
 
             uint32_t dynamicOffset = PadUniformBufferSize(sizeof(GpuSceneData)) * i;
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 0, 1, &currentFrame.globalDescriptorSet, 1, &dynamicOffset);
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderable.pipeline.pipelineLayout, 1, 1, &currentFrame.objectDescriptorSet, 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, lastPipeline->pipelineLayout, 0, 1, &currentFrame.globalDescriptorSet, 1, &dynamicOffset);
+            vkCmdBindDescriptorSets(commandBuffer, VkPipelineBindPoint::VK_PIPELINE_BIND_POINT_GRAPHICS, lastPipeline->pipelineLayout, 1, 1, &currentFrame.objectDescriptorSet, 0, nullptr);
         }
 
         if (renderable.mesh != lastMesh)

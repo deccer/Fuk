@@ -19,8 +19,19 @@ layout(set = 0, binding = 0) uniform CameraBuffer
     mat4 view_projection_matrix;
 } u_camera;
 
+struct ObjectData
+{
+	mat4 world_matrix;
+};
+
+layout(set = 1, binding = 0, std140) readonly buffer ObjectBuffer
+{
+	ObjectData objects[];
+} u_object_buffer;
+
 void main()
 {
-    gl_Position = u_camera.projection_matrix * u_camera.view_matrix * u_pc.world_matrix * vec4(i_position, 1.0f);
+    mat4 object_world_matrix = u_object_buffer.objects[gl_BaseInstance].world_matrix;
+    gl_Position = u_camera.projection_matrix * u_camera.view_matrix * object_world_matrix * vec4(i_position, 1.0f);
     v_uv = i_uv;
 }
