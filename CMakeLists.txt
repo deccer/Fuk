@@ -72,7 +72,7 @@ target_include_directories(stb SYSTEM PUBLIC ThirdParty/stb)
 
 # Compile Shaders
 
-find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
+find_program(GLSL_VALIDATOR glslangValidator PATHS $ENV{VULKAN_SDK}/bin REQUIRED)
 
 file(GLOB_RECURSE GLSL_SOURCE_FILES
     "${PROJECT_SOURCE_DIR}/data/shaders/*vs.glsl"
