@@ -93,17 +93,17 @@ std::vector<VertexPositionNormalUv> ConvertVertexBufferFormat(const fastgltf::As
     // Textureless meshes will use factors instead of textures
     if (primitive.findAttribute("TEXCOORD_0") != primitive.attributes.end())
     {
-      auto& texcoordAccessor = model.accessors[primitive.findAttribute("TEXCOORD_0")->second];
-      texcoords.resize(texcoordAccessor.count);
-      fastgltf::iterateAccessorWithIndex<glm::vec2>(model,
+        auto& texcoordAccessor = model.accessors[primitive.findAttribute("TEXCOORD_0")->second];
+        texcoords.resize(texcoordAccessor.count);
+        fastgltf::iterateAccessorWithIndex<glm::vec2>(model,
                                                     texcoordAccessor,
                                                     [&](glm::vec2 texcoord, std::size_t idx)
                                                     { texcoords[idx] = texcoord; });
     }
     else
     {
-      // If no texcoord attribute, fill with empty texcoords to keep everything consistent and happy
-      texcoords.resize(positions.size(), {});
+        // If no texcoord attribute, fill with empty texcoords to keep everything consistent and happy
+        texcoords.resize(positions.size(), {});
     }
 
     std::vector<VertexPositionNormalUv> vertices;
@@ -470,11 +470,18 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
                 mesh.worldMatrix = globalTransform;
                 mesh.name = fgMesh.name;
                 
-                auto label = std::format("VertexBuffer_{}", node->name);
-                auto createBufferResult = CreateBuffer(
-                    label,
-                    VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
-                    std::span(mesh.vertices));
+                auto createStagingBufferResult = CreateStagingBuffer(std::span(mesh.vertices));
+                if (!createStagingBufferResult.has_value())
+                {
+                    std::cerr << createStagingBufferResult.error() << "\n";
+                    return false;
+                }
+
+                auto bufferSize = createStagingBufferResult.value().bufferSize;
+                auto createBufferResult = CreateBuffer<VertexPositionNormalUv>(
+                    std::format("VertexBuffer_{}", node->name),
+                    bufferSize,
+                    VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
                 if (!createBufferResult.has_value())
                 {
                     std::cerr << createBufferResult.error() << "\n";
@@ -483,8 +490,18 @@ bool Engine::LoadMeshFromFile(const std::string& modelName, const std::string& f
 
                 mesh.vertexBuffer = createBufferResult.value();
 
+                SubmitImmediately([=](VkCommandBuffer commandBuffer)
+                {
+                    vkCmdCopyBuffer(commandBuffer, createStagingBufferResult.value().buffer, mesh.vertexBuffer.buffer, 1, ToTempPtr(VkBufferCopy
+                    {
+                        .srcOffset = 0,
+                        .dstOffset = 0,
+                        .size = bufferSize
+                    }));
+                });
+
                 createBufferResult = CreateBuffer(
-                    "IndexBuffer",
+                    std::format("IndexBuffer_{}", node->name),
                     VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_TO_GPU,
                     std::span(mesh.indices));
                 if (!createBufferResult.has_value())
@@ -824,7 +841,42 @@ bool Engine::InitializeCommandBuffers()
         {
             vkDestroyCommandPool(_device, _frameDates[i].commandPool, nullptr);
         });
-    }    
+    }
+
+    if (vkCreateCommandPool(
+        _device,
+        ToTempPtr(VkCommandPoolCreateInfo
+        {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = VkCommandPoolCreateFlagBits::VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+                .queueFamilyIndex = _graphicsQueueFamily,                
+        }),
+        nullptr,
+        &_uploadContext.commandPool) != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    _deletionQueue.Push([=, this]()
+    {
+        vkDestroyCommandPool(_device, _uploadContext.commandPool, nullptr);
+    });
+
+    if (vkAllocateCommandBuffers(
+        _device,
+        ToTempPtr(VkCommandBufferAllocateInfo
+        {
+            .sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .commandPool = _uploadContext.commandPool,
+            .level = VkCommandBufferLevel::VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        }),
+        &_uploadContext.commandBuffer) != VK_SUCCESS)
+    {
+        return false;
+    }
 
     return true;
 }
@@ -1361,9 +1413,9 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         GpuObjectData* gpuObjectDates = (GpuObjectData*)objectDataPtr;
         for (size_t i = 0; i < count; i++)
         {
-	        auto& renderable = first[i];
+            auto& renderable = first[i];
             //std::cout << "\nMesh: " << renderable.mesh->name << "\n" << glm::to_string(renderable.worldMatrix) << "\n";
-	        gpuObjectDates[i].worldMatrix = renderable.worldMatrix;
+            gpuObjectDates[i].worldMatrix = renderable.worldMatrix;
         }
         vmaUnmapMemory(_allocator, currentFrame.objectBuffer.allocation);
     }
@@ -1446,4 +1498,57 @@ size_t Engine::PadUniformBufferSize(size_t originalSize)
         alignedSize = (alignedSize + minUboAlignment - 1) & ~(minUboAlignment - 1);
     }
     return alignedSize;
+}
+
+VkCommandBufferBeginInfo Engine::CreateCommandBufferBeginInfo(VkCommandBufferUsageFlags flags)
+{
+    VkCommandBufferBeginInfo commandBufferBeginInfo = {};
+    commandBufferBeginInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    commandBufferBeginInfo.pNext = nullptr;
+    commandBufferBeginInfo.pInheritanceInfo = nullptr;
+    commandBufferBeginInfo.flags = flags;
+    return commandBufferBeginInfo;
+}
+
+VkSubmitInfo Engine::CreateSubmitInfo(VkCommandBuffer* commandBuffer)
+{
+    VkSubmitInfo submitInfo = {};
+    submitInfo.sType = VkStructureType::VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.pNext = nullptr;
+
+    submitInfo.waitSemaphoreCount = 0;
+    submitInfo.pWaitSemaphores = nullptr;
+    submitInfo.pWaitDstStageMask = nullptr;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = commandBuffer;
+    submitInfo.signalSemaphoreCount = 0;
+    submitInfo.pSignalSemaphores = nullptr;
+
+    return submitInfo;
+}
+
+void Engine::SubmitImmediately(std::function<void(VkCommandBuffer commandBuffer)>&& function)
+{
+    VkCommandBuffer commandBuffer = _uploadContext.commandBuffer;
+
+    //begin the command buffer recording. We will use this command buffer exactly once before resetting, so we tell vulkan that
+    VkCommandBufferBeginInfo commandBufferBeginInfo = CreateCommandBufferBeginInfo(VkCommandBufferUsageFlagBits::VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+    if (vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo) == VK_SUCCESS)
+    {
+        function(commandBuffer);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo = CreateSubmitInfo(&commandBuffer);
+
+        // submit command buffer to the queue and execute it.
+        // uploadFence will now block until the graphic commands finish execution
+        if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, _uploadContext.uploadFence) == VK_SUCCESS)
+        {
+            vkWaitForFences(_device, 1, &_uploadContext.uploadFence, true, UINT64_MAX);
+            vkResetFences(_device, 1, &_uploadContext.uploadFence);
+            vkResetCommandPool(_device, _uploadContext.commandPool, 0);
+        }
+    }
 }

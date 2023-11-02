@@ -111,9 +111,50 @@ private:
     FrameData& GetCurrentFrameData();
 
     UploadContext _uploadContext;
-    void ImmediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
+    void SubmitImmediately(std::function<void(VkCommandBuffer cmd)>&& function);
 
     size_t PadUniformBufferSize(size_t originalSize);
+
+    template<typename TData>
+    std::expected<AllocatedBuffer, std::string> CreateStagingBuffer(std::span<TData> data)
+    {
+        AllocatedBuffer buffer;
+        buffer.bufferSize = data.size() * sizeof(TData);
+        if (vmaCreateBuffer(
+            _allocator,
+            ToTempPtr(VkBufferCreateInfo
+            {
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = buffer.bufferSize,
+                .usage = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+            }),
+            ToTempPtr(VmaAllocationCreateInfo
+            {
+                .usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY
+            }),
+            &buffer.buffer,
+            &buffer.allocation,
+            nullptr) != VK_SUCCESS)
+        {
+            return std::unexpected("Vulkan: Failed to create staging buffer");
+        }
+
+        void* dataPtr = nullptr;
+        if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
+        {
+            return std::unexpected("Vulkan: Failed to map staging buffer");
+        }
+
+        memcpy(dataPtr, data.data(), buffer.bufferSize);
+        vmaUnmapMemory(_allocator, buffer.allocation);    
+
+        _deletionQueue.Push([=, this]()
+        {
+            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
+        });
+
+        return buffer;
+    }
 
     template<typename TData>
     std::expected<AllocatedBuffer, std::string> CreateBuffer(
@@ -122,13 +163,14 @@ private:
         std::span<TData> data)
     {
         AllocatedBuffer buffer;
+        buffer.bufferSize = data.size() * sizeof(TData);
         if (vmaCreateBuffer(
             _allocator,
             ToTempPtr(VkBufferCreateInfo
             {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = data.size() * sizeof(TData),
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = buffer.bufferSize,
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
             }),
             ToTempPtr(VmaAllocationCreateInfo
             {
@@ -163,7 +205,7 @@ private:
     template<typename TData>
     std::expected<AllocatedBuffer, std::string> CreateBuffer(
         const std::string& label,
-        std::size_t dataSize,
+        VkDeviceSize dataSize,
         VmaMemoryUsage memoryUsage)
     {
         AllocatedBuffer buffer;
@@ -171,9 +213,9 @@ private:
             _allocator,
             ToTempPtr(VkBufferCreateInfo
             {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = dataSize,
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
             }),
             ToTempPtr(VmaAllocationCreateInfo
             {
@@ -206,9 +248,9 @@ private:
             _allocator,
             ToTempPtr(VkBufferCreateInfo
             {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = sizeof(TData),
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
             }),
             ToTempPtr(VmaAllocationCreateInfo
             {
@@ -251,4 +293,7 @@ private:
     std::expected<VkShaderModule, std::string> LoadShaderModule(const std::string& filePath);
 
     void DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count);
+
+    VkCommandBufferBeginInfo CreateCommandBufferBeginInfo(VkCommandBufferUsageFlags flags = 0);
+    VkSubmitInfo CreateSubmitInfo(VkCommandBuffer* commandBuffer);
 };

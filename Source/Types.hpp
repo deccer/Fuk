@@ -17,6 +17,7 @@ struct AllocatedBuffer
 {
     VkBuffer buffer = {};
     VmaAllocation allocation = {};
+    VkDeviceSize bufferSize = 0ull;
 };
 
 struct AllocatedImage
