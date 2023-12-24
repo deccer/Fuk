@@ -26,15 +26,15 @@ int32_t main([[maybe_unused]] int32_t argc, [[maybe_unused]] char* argv[])
         return EXIT_FAILURE;
     }
 
-    auto currentTime = glfwGetTime();
-    auto previousTime = currentTime;
+    //auto currentTime = glfwGetTime();
+    //auto previousTime = currentTime;
 
     while (!glfwWindowShouldClose(engine.GetWindow()))
     {
         glfwPollEvents();
-        currentTime = glfwGetTime();
-        auto deltaTime = static_cast<float>(currentTime - previousTime);
-        previousTime = currentTime;
+        //currentTime = glfwGetTime();
+        //auto deltaTime = static_cast<float>(currentTime - previousTime);
+        //previousTime = currentTime;
 
         if (!engine.Draw())
         {
