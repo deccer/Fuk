@@ -20,18 +20,11 @@ set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(ThirdParty/glfw)
 
 # Setup: GLM
-add_subdirectory(ThirdParty/glm)
+add_subdirectory(ThirdParty/glm SYSTEM)
 target_compile_definitions(glm INTERFACE
     GLM_FORCE_AVX2
     GLM_FORCE_RADIANS
     GLM_FORCE_DEPTH_ZERO_TO_ONE
-)
-target_compile_options(glm
-    INTERFACE
-    $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
-    -Wno-everything>
-    $<$<CXX_COMPILER_ID:MSVC>:
-    -w>
 )
 
 # Setup: VMA
