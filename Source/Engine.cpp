@@ -1400,7 +1400,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
 	char* gpuSceneDataPtr = {};
 	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation, (void**)&gpuSceneDataPtr) == VK_SUCCESS)
     {
-	    uint32_t frameIndex = _frameIndex % FRAME_COUNT;
+	    uint32_t frameIndex = _frameIndex % FRAMES_IN_FLIGHT;
     	gpuSceneDataPtr += PadUniformBufferSize(sizeof(GpuSceneData)) * frameIndex;
 
         memcpy(gpuSceneDataPtr, &_gpuSceneData, sizeof(GpuSceneData));
