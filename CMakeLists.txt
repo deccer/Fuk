@@ -57,6 +57,12 @@ add_subdirectory(Source)
 # Setup: fastgltf
 add_subdirectory(ThirdParty/fastgltf)
 
+# Setup: stb
+add_library(stb
+    Source/Stbi.cpp
+)
+target_include_directories(stb SYSTEM PUBLIC ThirdParty/stb)
+
 # Compile Shaders
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

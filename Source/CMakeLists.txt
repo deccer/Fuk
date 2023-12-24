@@ -17,8 +17,6 @@ add_executable(Fuk
 
 if (MSVC)
     set_property(TARGET Fuk PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/")
-    target_compile_options(stb_image INTERFACE /w)
-    target_compile_options(glfw INTERFACE /w)
 endif ()
 
 add_dependencies(Fuk Shaders copy_data)
@@ -54,6 +52,8 @@ target_compile_definitions(Fuk PRIVATE
 target_include_directories(Fuk INTERFACE ${VULKAN_SDK}/include)
 target_include_directories(Fuk PUBLIC ${CMAKE_BINARY_DIR}/VulkanMemoryAllocator-src/include)
 
+target_include_directories(Fuk SYSTEM PRIVATE glm)
+
 target_link_libraries(Fuk PRIVATE
 	glm
 	vma
@@ -64,6 +64,7 @@ target_link_libraries(Fuk PRIVATE
 	vk-bootstrap
 	vk-bootstrap-compiler-warnings
 	fastgltf
+	stb
 )
 
 #get_cmake_property(_variableNames VARIABLES)

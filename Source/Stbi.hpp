@@ -20,9 +20,6 @@
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4100) // unreferenced formal parameter
-#if _MSC_VER > _MSC_SOME_VERSION
-#pragma warning(disable: xxxx) // disable one more for special version
-#endif
 #endif
 
 #define STB_IMAGE_IMPLEMENTATION
