@@ -1221,10 +1221,10 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
 
 	_gpuSceneData.ambientColor = {sin(arbitraryValue), 0, cos(arbitraryValue), 1};
 
-	void* gpuSceneDataPtr;
-	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation , (void**)&gpuSceneDataPtr) == VK_SUCCESS)
+	char* gpuSceneDataPtr = {};
+	if (vmaMapMemory(_allocator, _gpuSceneDataBuffer.allocation, (void**)&gpuSceneDataPtr) == VK_SUCCESS)
     {
-	    int frameIndex = _frameIndex % FRAME_COUNT;
+	    uint32_t frameIndex = _frameIndex % FRAME_COUNT;
     	gpuSceneDataPtr += PadUniformBufferSize(sizeof(GpuSceneData)) * frameIndex;
 
 	    memcpy(gpuSceneDataPtr, &_gpuSceneData, sizeof(GpuSceneData));
@@ -1254,7 +1254,7 @@ void Engine::DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, s
         pushConstants.worldMatrix = renderable.worldMatrix;
         vkCmdPushConstants(commandBuffer, renderable.pipeline.pipelineLayout, VkShaderStageFlagBits::VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GpuPushConstants), &pushConstants);
 
-        vkCmdDrawIndexed(commandBuffer, renderable.mesh->indices.size(), 1, 0, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(renderable.mesh->indices.size()), 1, 0, 0, 0);
     }
 }
 
