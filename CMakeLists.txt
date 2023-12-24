@@ -26,6 +26,13 @@ target_compile_definitions(glm INTERFACE
     GLM_FORCE_RADIANS
     GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
+target_compile_options(glm
+    INTERFACE
+    $<$<OR:$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
+    -Wno-everything>
+    $<$<CXX_COMPILER_ID:MSVC>:
+    -w>
+)
 
 # Setup: VMA
 set(VMA_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
