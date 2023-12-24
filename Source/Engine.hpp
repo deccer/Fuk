@@ -20,13 +20,6 @@
 
 #include "DeletionQueue.hpp"
 #include "Types.hpp"
-#include "Pipeline.hpp"
-#include "Mesh.hpp"
-#include "Renderable.hpp"
-#include "FrameData.hpp"
-#include "UploadContext.hpp"
-
-constexpr uint32_t FRAMES_IN_FLIGHT = 2;
 
 template<typename T>
 void SetDebugName(VkDevice device, T object, const std::string& debugName)
@@ -55,21 +48,18 @@ public:
 
     GLFWwindow* GetWindow();
 
-    Mesh* GetMesh(const std::string& name);
-    std::vector<Mesh*> GetModel(const std::string& name);
-
 private:
-    std::vector<Renderable> _renderables;
-    std::unordered_map<std::string, std::vector<std::string>> _modelNameToMeshNameMap;
-    std::unordered_map<std::string, Mesh> _meshNameToMeshMap;
+    bool InitializeVulkan();
 
-    int32_t _frameIndex{0};
+    DeletionQueue _deletionQueue;
+
     VkExtent2D _windowExtent{1920, 1080};
     bool _vsync{true};
     std::string _windowTitle{"Fuk"};
-    DeletionQueue _deletionQueue;
 
     GLFWwindow* _window{nullptr};
+
+    VmaAllocator _allocator;
     VkInstance _instance;
 #ifdef _DEBUG
     VkDebugUtilsMessengerEXT _debugMessenger;
@@ -79,221 +69,6 @@ private:
     VkDevice _device;
     VkSurfaceKHR _surface;
 
-    VkSwapchainKHR _swapchain;
-    VkFormat _swapchainImageFormat;
-    std::vector<VkImage> _swapchainImages;
-    std::vector<VkImageView> _swapchainImageViews;
-
-    AllocatedImage _depthImage;
-    VkFormat _depthFormat;
-
     VkQueue _graphicsQueue;
     uint32_t _graphicsQueueFamily;
-
-    VkRenderPass _renderPass;
-    std::vector<VkFramebuffer> _framebuffers;
-
-    VkDescriptorSetLayout _globalDescriptorSetLayout;
-    VkDescriptorSetLayout _objectDescriptorSetLayout;
-    VkDescriptorPool _descriptorPool;    
-
-    VkShaderModule _simpleVertexShaderModule;
-    VkShaderModule _simpleFragmentShaderModule;
-
-    VmaAllocator _allocator;
-
-    VkPipeline _meshPipeline;
-
-    GpuSceneData _gpuSceneData;
-    AllocatedBuffer _gpuSceneDataBuffer;
-
-    FrameData _frameDates[FRAMES_IN_FLIGHT];
-    FrameData& GetCurrentFrameData();
-
-    UploadContext _uploadContext;
-    void SubmitImmediately(std::function<void(VkCommandBuffer cmd)>&& function);
-
-    size_t PadUniformBufferSize(size_t originalSize);
-
-    template<typename TData>
-    std::expected<AllocatedBuffer, std::string> CreateStagingBuffer(std::span<TData> data)
-    {
-        AllocatedBuffer buffer;
-        buffer.bufferSize = data.size() * sizeof(TData);
-        if (vmaCreateBuffer(
-            _allocator,
-            ToTempPtr(VkBufferCreateInfo
-            {
-                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = buffer.bufferSize,
-                .usage = VkBufferUsageFlagBits::VK_BUFFER_USAGE_TRANSFER_SRC_BIT
-            }),
-            ToTempPtr(VmaAllocationCreateInfo
-            {
-                .usage = VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY
-            }),
-            &buffer.buffer,
-            &buffer.allocation,
-            nullptr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to create staging buffer");
-        }
-
-        void* dataPtr = nullptr;
-        if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to map staging buffer");
-        }
-
-        memcpy(dataPtr, data.data(), buffer.bufferSize);
-        vmaUnmapMemory(_allocator, buffer.allocation);    
-
-        _deletionQueue.Push([=, this]()
-        {
-            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
-        });
-
-        return buffer;
-    }
-
-    template<typename TData>
-    std::expected<AllocatedBuffer, std::string> CreateBuffer(
-        const std::string& label,
-        VmaMemoryUsage memoryUsage,
-        std::span<TData> data)
-    {
-        AllocatedBuffer buffer;
-        buffer.bufferSize = data.size() * sizeof(TData);
-        if (vmaCreateBuffer(
-            _allocator,
-            ToTempPtr(VkBufferCreateInfo
-            {
-                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = buffer.bufferSize,
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
-            }),
-            ToTempPtr(VmaAllocationCreateInfo
-            {
-                .usage = memoryUsage
-            }),
-            &buffer.buffer,
-            &buffer.allocation,
-            nullptr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to create buffer");
-        }
-
-        SetDebugName(_device, buffer.buffer, label);
-
-        void* dataPtr = nullptr;
-        if (vmaMapMemory(_allocator, buffer.allocation, &dataPtr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to map buffer");
-        }
-
-        memcpy(dataPtr, data.data(), data.size() * sizeof(TData));
-        vmaUnmapMemory(_allocator, buffer.allocation);    
-
-        _deletionQueue.Push([=, this]()
-        {
-            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
-        });
-
-        return buffer;
-    }
-
-    template<typename TData>
-    std::expected<AllocatedBuffer, std::string> CreateBuffer(
-        const std::string& label,
-        VkDeviceSize dataSize,
-        VmaMemoryUsage memoryUsage)
-    {
-        AllocatedBuffer buffer;
-        if (vmaCreateBuffer(
-            _allocator,
-            ToTempPtr(VkBufferCreateInfo
-            {
-                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = dataSize,
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
-            }),
-            ToTempPtr(VmaAllocationCreateInfo
-            {
-                .usage = memoryUsage
-            }),
-            &buffer.buffer,
-            &buffer.allocation,
-            nullptr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to create buffer");
-        }
-
-        SetDebugName(_device, buffer.buffer, label);
-
-        _deletionQueue.Push([=, this]()
-        {
-            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
-        });
-
-        return buffer;
-    }
-
-    template<typename TData>
-    std::expected<AllocatedBuffer, std::string> CreateBuffer(
-        const std::string& label,
-        VmaMemoryUsage memoryUsage)
-    {
-        AllocatedBuffer buffer;
-        if (vmaCreateBuffer(
-            _allocator,
-            ToTempPtr(VkBufferCreateInfo
-            {
-                .sType = VkStructureType::VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                .size = sizeof(TData),
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT
-            }),
-            ToTempPtr(VmaAllocationCreateInfo
-            {
-                .usage = memoryUsage
-            }),
-            &buffer.buffer,
-            &buffer.allocation,
-            nullptr) != VK_SUCCESS)
-        {
-            return std::unexpected("Vulkan: Failed to create buffer");
-        }
-
-        SetDebugName(_device, buffer.buffer, label);
-
-        _deletionQueue.Push([=, this]()
-        {
-            vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
-        });
-
-        return buffer;
-    }
-
-    std::expected<AllocatedImage, std::string> CreateImage(
-        const std::string& label,
-        VkFormat format,
-        VkImageUsageFlags imageUsageFlags,
-        VkImageAspectFlags imageAspectFlags,
-        VkExtent3D extent);
-
-    bool InitializeVulkan();
-    bool InitializeSwapchain();
-    bool InitializeCommandBuffers();
-    bool InitializeRenderPass();
-    bool InitializeFramebuffers();
-    bool InitializeDescriptors();
-    bool InitializeSynchronizationStructures();
-
-    bool LoadMeshFromFile(const std::string& modelName, const std::string& filePath);
-
-    std::expected<VkShaderModule, std::string> LoadShaderModule(const std::string& filePath);
-
-    void DrawRenderables(VkCommandBuffer commandBuffer, Renderable* first, size_t count);
-
-    VkCommandBufferBeginInfo CreateCommandBufferBeginInfo(VkCommandBufferUsageFlags flags = 0);
-    VkSubmitInfo CreateSubmitInfo(VkCommandBuffer* commandBuffer);
 };

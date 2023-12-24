@@ -10,9 +10,7 @@ endif ()
 
 add_executable(Fuk
     Engine.cpp
-	PipelineBuilder.cpp
-	Mesh.cpp
-    Main.cpp
+	Main.cpp
 )
 
 if (MSVC)

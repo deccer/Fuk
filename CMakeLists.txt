@@ -59,7 +59,7 @@ add_subdirectory(ThirdParty/fastgltf)
 
 # Setup: stb
 add_library(stb
-    Source/Stbi.cpp
+    Source/BuildStbi.cpp
 )
 target_include_directories(stb SYSTEM PUBLIC ThirdParty/stb)
 
