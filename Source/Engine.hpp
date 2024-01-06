@@ -38,6 +38,18 @@ void SetDebugName(VkDevice device, T object, const std::string& debugName)
 #endif
 }
 
+struct FrameData
+{
+	VkCommandPool commandPool = {};
+	VkCommandBuffer mainCommandBuffer = {};
+
+    VkSemaphore presentSemaphore = {};
+    VkSemaphore renderSemaphore = {};
+    VkFence renderFence = {};
+};
+
+constexpr uint32_t FRAME_OVERLAP = 2;
+
 class Engine
 {
 public:
@@ -50,6 +62,16 @@ public:
 
 private:
     bool InitializeVulkan();
+    bool InitializeSwapchain();
+    bool InitializeCommands();
+    bool InitializeSynchronizationStructures();
+
+    bool CreateSwapchain(uint32_t width, uint32_t height);
+    void DestroySwapchain();
+
+    FrameData _frames[FRAME_OVERLAP];
+	FrameData& GetCurrentFrameData();
+    uint32_t _frameNumber = 0;
 
     DeletionQueue _deletionQueue;
 
@@ -71,4 +93,12 @@ private:
 
     VkQueue _graphicsQueue;
     uint32_t _graphicsQueueFamily;
+
+
+    VkSwapchainKHR _swapchain;
+    VkFormat _swapchainImageFormat;
+    std::vector<VkImage> _swapchainImages;
+    std::vector<VkImageView> _swapchainImageViews;
+    VkExtent2D _swapchainExtent;    
 };
+
